@@ -1,0 +1,60 @@
+# RStudio / R session
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+.RDataTmp*
+.Rapp.history
+
+# knitr / rmarkdown intermediates
+analysisfinal_files/
+*.knit.md
+*.utf8.md
+
+# macOS
+.DS_Store
+
+# =====================================================================
+# DATA POLICY  (PUBLIC method repo), CODE-ONLY
+#   This PUBLIC repository publishes the CODE and analysis PIPELINE only,
+#   plus the literature-derived life-history PARAMETERS the pipeline needs.
+#   NO field data, NO merged datasets, NO generated outputs (results,
+#   figures, interactive maps, specimen catalogue), and NO manuscript are
+#   published here: the raw records carry GPS coordinates, specimen photos,
+#   and third-party angler names. The full data + manuscript live in a
+#   separate PRIVATE repository for examination. Bring your own data to run.
+# =====================================================================
+
+# Raw field data (sensitive: GPS coordinates + specimen photos)
+/all_records/
+/historical_tagging/
+
+# Merged individual-record datasets (built from the raw data)
+/combined_records/
+/combined_dataset.csv
+
+# All generated outputs (tables, figures, interactive maps, photo catalogue)
+/results/
+/graphs and maps/
+/catalog/
+
+# Superseded manuscript draft
+/Analysis RMD/
+
+# Generated manuscript + throwaway render artifacts
+/analysisfinal.docx
+*_preview.docx
+_verify*.Rmd
+_verify*.docx
+~$*
+
+# Manuscript source: lives only in the private repo, not this public method release
+/analysisfinal.Rmd
+/references.bib
+/frontiers.csl
+
+# Superseded script copies / stray backups
+/analysistwo.R
+/stresstest.R
+/analysis.Rmd
+/gitignore.txt
