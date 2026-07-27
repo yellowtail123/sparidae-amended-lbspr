@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software or pipeline, please cite it as below."
 title: "Sparidae length-based stock assessment pipeline (LBSPR with a sequential-hermaphroditism amendment)"
-abstract: "R pipeline for a single-season length-based assessment of exploited seabreams in Gibraltar waters: catch composition, community diversity, length-based indicators, LBSPR spawning-potential-ratio with a sex-structured amendment, catch-curve cross-check, and an operating-model validation and misspecification stress battery."
+abstract: "R pipeline for a single-season length-based assessment of exploited seabreams in Gibraltar waters: catch composition, length-based indicators, LBSPR spawning-potential-ratio with a sex-structured amendment, catch-curve cross-check, and an operating-model validation and misspecification stress battery."
 authors:
   - family-names: "Jemal"
     given-names: "Alexander H."
@@ -10,7 +10,7 @@ authors:
 version: 1.0.0
 date-released: "2026-08-01"   # set to the actual date you cut the release
 license: MIT
-repository-code: "https://github.com/yellowtail123/sparidae-lbspr"
+repository-code: "https://github.com/yellowtail123/sparidae-amended-lbspr"
 keywords:
   - fisheries
   - stock assessment
