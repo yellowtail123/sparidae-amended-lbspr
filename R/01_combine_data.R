@@ -1,24 +1,25 @@
 # =====================================================================
 # BUILD combined_dataset.csv  —  own 2026 season + historical tagging records
 # =====================================================================
-# Merges your live 2026 catch exports (all_records/bream_*.csv) with the historical
+# Merges the live season catch exports (all_records/bream_*.csv) with the historical
 # tagging records (historical_tagging/*.csv) into one cleaned, length-reconciled file
-# written to combined_records/combined_dataset.csv. That single file is what the Rmd's
-# combined analysis reads; nothing else in the pipeline changes.
+# written to combined_records/combined_dataset.csv. That file is produced for onward
+# analysis; nothing else in this repository reads it.
 #
-# WORKFLOW: whenever you add new 2026 exports to all_records/, re-run this script, then
-# knit the Rmd. all_records/ is READ ONLY here — the script never writes to it or edits it.
+# WORKFLOW: whenever new season exports are added to all_records/, re-run this script.
+# all_records/ is READ ONLY here: the script never writes to it or edits it.
 #
-# FOLDERS EXPECTED (all under the project root):
-#   all_records/         your bream_*.csv exports (and photos; only the CSVs are read)
-#   historical_tagging/  the historical CSV(s), e.g. GOG_tagging_cleaned_sparidae.csv
-#   combined_records/     destination — created if absent; combined_dataset.csv written here
+# FOLDERS EXPECTED (under the project root; none is supplied with this repository):
+#   all_records/         the bream_*.csv exports (and photos; only the CSVs are read)
+#   historical_tagging/  the historical tagging CSV(s)
+#   combined_records/    destination, created if absent; combined_dataset.csv written here
 #
-# LENGTH SCALE: your 2026 lengths are fork length (FL); the historical records are total
-# length (TL). Both are placed on the TL scale here (FL -> TL via / TL_FL_RATIO), and the
-# Rmd's combined-data chunk converts the pooled series back onto the FL scale before it is
-# assessed. That round-trip is intentional and already in place; do not change one side
-# without the other.
+# LENGTH SCALE (important): the season lengths are fork length (FL); the historical
+# records are total length (TL). Both are placed on the TL scale here (FL -> TL via
+# / TL_FL_RATIO), so THE OUTPUT OF THIS SCRIPT IS ON THE TL SCALE. Any downstream
+# analysis must convert the pooled series back to FL before assessing it, because the
+# life-history parameters are applied on the FL scale. Do not change one side of that
+# round-trip without the other.
 # =====================================================================
 
 suppressPackageStartupMessages({
@@ -58,8 +59,8 @@ read_folder <- function(dir, pattern, label) {
     mutate(dataset = label)
 }
 
-# 2026 season: the SAME bream_*.csv pattern the Rmd's base loader uses, so the combined
-# 2026 rows are exactly the fish the base assessment sees.
+# Season: the SAME bream_*.csv pattern R/02_analysis.R uses, so the combined season rows
+# are exactly the fish the base assessment sees.
 own  <- read_folder(OWN_DIR,  "^bream_.*\\.csv$", "2026 season")
 # Historical: every CSV in historical_tagging/ (drop additional historical files in later
 # and they are picked up automatically).

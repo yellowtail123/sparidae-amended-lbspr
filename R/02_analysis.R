@@ -1624,7 +1624,7 @@ make_length_sample <- function(om, n, CVlen = 0.10, binwidth = 1) {
 # should recover the OM's psi_f-weighted SPR_true; run_scenario()/run_stress() below
 # currently summarise SPR_std and SPR_bind only. Carry SPR_fem through if you want the
 # validation table to show the unbiased female estimator beside the naive SPR_std and
-# the precautionary SPR_bind (recommended for the manuscript).
+# the precautionary SPR_bind (recommended when reporting the validation).
 estimate_from_sample <- function(samp, Linf, MK, L50, L95,
                                  sex, LD50, LD95, b_lw = 3, cvlinf = 0.10) {
   L <- rep(samp$Lmids, round(samp$counts))          # bin counts -> pseudo-lengths at midpoints

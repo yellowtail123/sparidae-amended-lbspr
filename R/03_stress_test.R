@@ -147,7 +147,7 @@ if (RUN_OM_DOME) {
 #      Note this is the OPPOSITE of the intuition that the male floor makes
 #      the estimate over-conservative: the collapse of true female output
 #      dominates. This is an important, slightly counter-intuitive result —
-#      read it carefully before quoting a direction in the manuscript.
+#      read it carefully before quoting a direction in any write-up.
 # ----------------------------------------------------------------------
 if (RUN_OM_COMP) {
   set.seed(42)
