@@ -4,7 +4,7 @@
 
 The work presented here sets out to address the data-poverty of British Gibraltar Territorial Waters,
 where the exploited seabreams (family Sparidae) have gone almost entirely unassessed, by building a
-length-based spawning-potential-ratio (LB-SPR) assessment amended to represent spawning potential more
+length-based spawning-potential-ratio (LB-SPR, Hordyk et al., 2015) assessment amended to represent spawning potential more
 accurately in sequentially hermaphroditic fishes. Assembled for a single-season master's thesis in
 Gibraltar, the pipeline is written to run on any comparable length dataset. Given a season of length
 records (with weight, sex and location where those were recorded), it works through catch composition
@@ -36,7 +36,7 @@ in the same format.
 | Catch composition & diversity | Species composition, rank–abundance, Hill numbers, rarefaction / sample coverage (via **vegan** and **iNEXT**). |
 | Length-based indicators | Standard length-based reference indicators per species (subject to a minimum-sample-size gate). |
 | Mortality cross-check | Empirical natural-mortality envelope and a length-converted catch curve (both via **TropFishR**) as an independent check on the assessment. |
-| LBSPR assessment | Spawning potential ratio from length composition via the **LBSPR** package (Hordyk), with life-history uncertainty propagated by a length bootstrap and a parameter Monte-Carlo draw. |
+| LBSPR assessment | Spawning potential ratio from length composition via the **LBSPR** package (Hordyk et al., 2015), with life-history uncertainty propagated by a length bootstrap and a parameter Monte-Carlo draw. |
 | Sequential-hermaphroditism amendment | A sex-structured re-weighting of egg output layered on top of the LBSPR fit. |
 | Diel & length–weight | Day/night composition and length–weight relationships (each auto-activates only when the data clears its threshold). |
 | Tagging | Capture / recapture summary (movement/growth analysis is present but intentionally commented out). |
