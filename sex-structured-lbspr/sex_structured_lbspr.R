@@ -9,10 +9,10 @@
 # a precautionary male-capacity floor, applied as a POST-PROCESSING step that leaves the
 # LBSPR fit (F/M, selectivity, package SPR) untouched. See README.md for the mathematics.
 #
-# PROVENANCE: these functions are copied VERBATIM from the thesis analysis pipeline,
-# `R/02_analysis.R` section 10b, which remains the canonical source. Nothing in the thesis
-# was moved or removed; this folder is a standalone extract so the method can be read and
-# reused on its own. If the canonical version changes, re-copy from there.
+# PROVENANCE: these functions are copied VERBATIM from the assessment pipeline,
+# `R/02_analysis.R` section 10b, which remains the canonical source. This folder is a
+# standalone extract so the method can be read and reused on its own. If the canonical
+# version changes, re-copy from there.
 #
 # USAGE:
 #   source("sex_structured_lbspr.R")

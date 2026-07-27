@@ -21,10 +21,10 @@ fit itself (fishing mortality `F/M`, gear selectivity `SL50`/`SL95`, and the pac
 With the sex layer disabled, or for a gonochoristic (separate-sex) species, it reduces
 **exactly** to standard LB-SPR, so it is a *generalisation*, not a competing method.
 
-> **Provenance.** These functions are copied **verbatim** from the thesis analysis pipeline
-> (`../R/02_analysis.R`, section 10b), which remains the canonical source. Nothing in the
-> thesis was moved or removed; this folder is a standalone extract so the method can be read and
-> reused on its own. The typeset mathematics is given in §§1–2 below.
+> **Provenance.** These functions are copied **verbatim** from the assessment pipeline
+> (`../R/02_analysis.R`, section 10b), which remains the canonical source. This folder is a
+> standalone extract so the method can be read and reused on its own. The typeset mathematics is
+> given in §§1–2 below.
 
 ---
 
@@ -147,6 +147,9 @@ To run the whole **fit → reweight** path from measured lengths (requires the `
 res <- fit_lbspr_one(L, lh_row)   # res$SPR = standard LBSPR; res$SPR_bind = amended status
 ```
 
+`lh_row` is a single row carrying the columns in `example_life_history.csv`: `scientific_name`,
+`sex_system`, `Linf`, `MK`, `L50`, `L95`, `LD50`, `LD95`, `FecB`, `CVLinf`, `a` and `b`.
+
 Run the demonstration:
 
 ```sh
@@ -155,17 +158,18 @@ Rscript example.R
 
 ## 5. References
 
-- Hordyk, A., Ono, K., Valencia, S., Loneragan, N. & Prince, J. (2015a) *Some explorations of
+- Hordyk, A., Ono, K., Sainsbury, K., Loneragan, N. & Prince, J. (2015a) *Some explorations of
   the life history ratios to describe length composition, spawning-per-recruit, and the
-  spawning potential ratio.* ICES Journal of Marine Science.
-- Hordyk, A., Ono, K., Sainsbury, K., Loneragan, N. & Prince, J. (2015b) *A novel length-based
+  spawning potential ratio.* ICES Journal of Marine Science 72(1): 204–216.
+- Hordyk, A., Ono, K., Valencia, S., Loneragan, N. & Prince, J. (2015b) *A novel length-based
   empirical estimation method of spawning potential ratio (SPR), and tests of its performance,
-  for small-scale, data-poor fisheries.* ICES Journal of Marine Science.
+  for small-scale, data-poor fisheries.* ICES Journal of Marine Science 72(1): 217–231.
 - Hordyk, A.R., Ono, K., Prince, J.D. & Walters, C.J. (2016) *A simple length-structured model
   based on life history ratios and incorporating size-dependent selectivity: application to
   spawning potential ratios for data-poor stocks.* Canadian Journal of Fisheries and Aquatic
   Sciences.
-- Hordyk, A. (`LBSPR`) *LBSPR: Length-Based Spawning Potential Ratio.* R package.
+- Hordyk, A. (`LBSPR`) *LBSPR: Length-Based Spawning Potential Ratio.* R package,
+  https://github.com/AdrianHordyk/LBSPR
 - Goodyear, C.P. (1993) *Spawning stock biomass per recruit in fisheries management: foundation
   and current use.*
 - Buxton, C.D. & Garratt, P.A. (1990) *Alternative reproductive styles in seabreams (Pisces:
