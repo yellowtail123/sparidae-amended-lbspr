@@ -14,8 +14,9 @@ sequential hermaphrodites that assumption is wrong:
 - **Protandry** (male → female): the largest fish *are* the egg-producers, so fishing hits egg
   output harder than a sex-blind model implies.
 
-This amendment reweights egg output by a **proportion-female-at-length ogive** and adds a
-**precautionary male-capacity floor**. It is applied as a **post-processing step**: the LB-SPR
+This amendment reweights egg output by a **proportion-female-at-length ogive** and reports a
+**mature-male capacity ratio alongside it** as a diagnostic. It is applied as a **post-processing
+step**: the LB-SPR
 fit itself (fishing mortality `F/M`, gear selectivity `SL50`/`SL95`, and the package SPR) is
 **left completely unchanged**, because maturity and sex play no part in the LB-SPR likelihood.
 With the sex layer disabled, or for a gonochoristic (separate-sex) species, it reduces
@@ -52,9 +53,9 @@ E = \sum_{L} N(L)\,m(L)\,W(L),\quad W(L) = a\,L^{b},
 $$
 
 where $N(L)$ is survivorship-at-length (fished $N_F$ or unfished $N_0$) and $W(L)=aL^b$ is
-mass-at-length. Status is read against the conventional reference points $\mathrm{SPR}=0.40$
-(target) and $\mathrm{SPR}=0.20$ (limit) (Goodyear 1993), with $F/M = 1$ marking fishing
-mortality equal to natural mortality.
+mass-at-length. Status is $\mathrm{SPR}_{f}$, the egg-based ratio, read against the conventional
+reference points $\mathrm{SPR}=0.40$ (target) and $\mathrm{SPR}=0.20$ (limit) (Goodyear 1993),
+with $F/M = 1$ marking fishing mortality equal to natural mortality.
 
 ## 2. The amendment (sex-structured SPR)
 
@@ -84,10 +85,13 @@ $$
 - **Gonochores and rudimentary hermaphrodites** take a *constant* female fraction $\tfrac12$.
   Because a constant factor cancels from the ratio $E_F/E_0$, $\mathrm{SPR}_f$ **reduces exactly
   to the standard SPR**; the amendment changes nothing where there is no functional sex change.
-- **Male-capacity floor.** In protogyny the large (male) fish are removed first, so egg-based
-  SPR alone can be optimistic. A male analogue replaces the female fraction with its complement
-  $1-\psi_f(L)$, giving a mature-male reproductive-capacity ratio $\mathrm{SPR}_{m}$. The status
-  reported for protogynous species is the more precautionary of the two:
+- **Male-capacity diagnostic.** Under protogyny the large fish are male and go first, so egg-based
+  SPR alone will not show a thinned-out male component. Replacing the female fraction with its
+  complement $1-\psi_f(L)$ gives $\mathrm{SPR}_{m}$. Report it as $\mathrm{SPR}_{m}/\mathrm{SPR}_{f}$
+  against 1: one means both halves are equally depleted, below one the males are the depleted half.
+  It has **no reference point**, so do not read it against 0.20 and 0.40.
+
+  The precautionary minimum is still computed, but it is **not** the status:
 
 $$
 \mathrm{SPR}_{\mathrm{bind}} =
@@ -97,9 +101,10 @@ $$
 \end{cases}
 $$
 
-  The male floor is deliberately conservative: it *bounds the risk* of male limitation but does
-  not estimate fertilisation success, because the mating function relating sex ratio to realised
-  reproduction is unknown for these species (Heppell et al. 2006; Easter & White 2020).
+  The male ratio flags a risk; it does not estimate fertilisation success, because the mating
+  function is unknown for these species (Heppell et al. 2006; Easter & White 2020). Note too that
+  the status assumes a **fixed** sex-change schedule. If females convert earlier as large males are
+  taken, egg production falls but the lengths barely move, and this method will not see it.
 
 - **Fit-invariance.** Maturity and sex never enter the LB-SPR likelihood, which depends only on
   the length data and the selectivity and mortality parameters. The amendment therefore takes
@@ -130,8 +135,8 @@ sx <- spr_sex_structured(
   FecB = 3, CVLinf = 0.10, MaleExp = 3)
 sx$SPR_gono_check   # standard LBSPR (replica of the package SPR)
 sx$SPR_fem          # female (egg-based) SPR
-sx$SPR_male         # male reproductive-capacity ratio (the floor)
-sx$SPR_bind         # the status to report
+sx$SPR_male         # male capacity ratio (diagnostic; read as SPR_male / SPR_fem against 1)
+sx$SPR_bind         # precautionary minimum, retained for audit; NOT the status
 ```
 
 `spr_sex_structured()` arguments: `FM`, `SL50`, `SL95` (from the fit); `Linf`, `MK`, `L50`,
@@ -144,7 +149,7 @@ as a ratio applied to it).
 To run the whole **fit → reweight** path from measured lengths (requires the `LBSPR` package):
 
 ```r
-res <- fit_lbspr_one(L, lh_row)   # res$SPR = standard LBSPR; res$SPR_bind = amended status
+res <- fit_lbspr_one(L, lh_row)   # res$SPR = standard LBSPR; res$SPR_fem = amended status
 ```
 
 `lh_row` is a single row carrying the columns in `example_life_history.csv`: `scientific_name`,

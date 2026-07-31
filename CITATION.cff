@@ -8,7 +8,7 @@ authors:
     affiliation: "University of Gibraltar"
     email: "206385@unigib.edu.gi"
 version: 1.0.0
-date-released: "2026-08-01"   # set to the actual date you cut the release
+date-released: "2026-07-31"
 license: MIT
 repository-code: "https://github.com/yellowtail123/sparidae-amended-lbspr"
 keywords:
@@ -18,4 +18,3 @@ keywords:
   - spawning potential ratio
   - sequential hermaphroditism
   - Sparidae
-# doi: "ADD AFTER FIRST ZENODO RELEASE"

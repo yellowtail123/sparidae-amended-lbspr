@@ -6,7 +6,7 @@
 # mature fish as an egg-producer; for sequential hermaphrodites that is wrong (protogyny
 # -> the large fish are MALE and produce no eggs; protandry -> the egg-producers ARE the
 # large fish). This reweights egg output by a proportion-female-at-length ogive and adds
-# a precautionary male-capacity floor, applied as a POST-PROCESSING step that leaves the
+# a mature-male capacity diagnostic, applied as a POST-PROCESSING step that leaves the
 # LBSPR fit (F/M, selectivity, package SPR) untouched. See README.md for the mathematics.
 #
 # PROVENANCE: these functions are copied VERBATIM from the assessment pipeline,
@@ -66,8 +66,11 @@ make_lf <- function(x, Linf, binwidth = BINWIDTH) {
 #   psi_f(L): gonochore -> 0.5 (cancels) ; protogyny -> descending 1->0 ;
 #             protandry -> ascending 0->1.  Ogive uses LD50/LD95 (same scale as Linf).
 #   SPR_fem  : female (egg) SPR.   SPR_male: male-CAPACITY ratio (mature-male biomass-
-#             per-recruit; a precautionary floor for protogyny, NOT a fertilisation
-#             estimate - the mating function is unknown).   SPR_bind: status to report
+#             per-recruit; a DIAGNOSTIC read as SPR_male / SPR_fem against parity, NOT a
+#             fertilisation estimate and NOT read against the 0.20 / 0.40 zones - those are
+#             defined for spawning output and none exists for a male biomass ratio).
+#             SPR_fem: the status to report.   SPR_bind: precautionary minimum, retained
+#             for continuity and audit; not the status
 #             = SPR_fem, except protogyny where it is min(SPR_fem, SPR_male).
 spr_sex_structured <- function(FM, SL50, SL95,
                                Linf, MK, L50, L95, FecB = 3, CVLinf = 0.10,
