@@ -28,8 +28,9 @@ Egg output is reweighted by a proportion-female-at-length ogive, applied after t
 inside it. The LB-SPR fit is untouched, so F/M, selectivity and the package's own SPR come through
 unchanged. Apply it to a gonochore and you get standard LB-SPR back exactly.
 
-For protogynous species it also computes a male capacity ratio and reports the lower of the two.
-Fishing the large end of a protogynous stock removes males, which standard SPR cannot see.
+It also computes a mature-male capacity ratio, reported *alongside* the egg-based status rather than
+folded into it. Fishing the large end of a protogynous stock removes males, which standard SPR cannot
+see, and which egg-based SPR on its own will not tell you either.
 
 ## Using it on your own species
 
@@ -39,13 +40,33 @@ Three fields, in the life-history table rather than the catch records:
 |---|---|
 | `sex_system` | `protandry`, `protogyny`, `gonochore` or `rudimentary` |
 | `LD50_sexchange_cm_TL` | length at 50% sex change |
-| `LD95_sexchange_cm_TL` | length at 95%, defaults to 1.10 × LD50 |
+| `LD95_sexchange_cm_TL` | length at 95% sex change; falls back to 1.10 × LD50 |
 
 **No per-fish sex data is needed.** Leave `LD50` blank and it falls back to standard LB-SPR instead
 of failing. Anything outside those four `sex_system` values stops the run rather than guessing.
 
-Report **`SPR_bind`**: the female egg-based SPR, or under protogyny the lower of that and the male
-ratio.
+Treat the `LD95` fallback as an assumption rather than an edge case. No species in the assemblage
+assessed here carries a retrieved length at 95% sex change, so the 1.10 rule was applied to all twelve
+functional hermaphrodites. `02` sweeps both the location and the width of that ogive as separate
+sensitivity axes, and you should expect to do the same: on this dataset the width axis leaves the
+egg-based status almost unchanged but moves the male diagnostic by more than a factor of two in one
+species.
+
+Report **`SPR_fem`**, the female egg-based ratio, as the status. That is the quantity the conventional
+reference points describe: SPR = 0.40 and SPR = 0.20 are defined for spawning output per recruit
+(Goodyear 1993), and no reference point has been established for a mature-male biomass ratio.
+
+Report **`SPR_male`** alongside it as a diagnostic, read as `SPR_male / SPR_fem` against parity rather
+than against the status zones. One means both halves are equally depleted; below one the male arm is
+the depleted one, which is what protogyny predicts; above one the egg producers are, which is what
+protandry predicts. The two cannot share the same zones. Because the male ratio is weighted by mass it
+sits almost entirely in the largest fish, which under protogyny are the males a size-selective fishery
+takes first, so it falls far faster than the egg-based ratio and reaches 0.20 at a relative fishing
+mortality near one. A stock fished at *F* equal to *M*, a conventional target, would be called
+overfished on that index alone.
+
+**`SPR_bind`**, the lesser of the two, is still computed and written out for continuity, but it is not
+the status.
 
 ## Running the pipeline
 
@@ -122,9 +143,9 @@ level of four stressors. Turn it down while you are setting up:
 
 The simulation stages cache to `results/om_*.csv` and the figures are rebuilt from whatever is on
 disk, so **delete the stale CSV before re-running a stressor with changed settings**; the figures
-will not tell you they came from the previous run. Keep `FINAL_RUN` the same in `02` and in
-`analysisfinal.Rmd`: both write the same files into `results/`, so if they disagree, the intervals
-you report depend on which ran last.
+will not tell you they came from the previous run. If you knit a manuscript from the same
+`results/`, keep its `FINAL_RUN` the same as in `02`: both write the same files, so if they disagree,
+the intervals you report depend on which ran last. The manuscript source is not published here.
 
 ### When it stops
 
@@ -177,10 +198,23 @@ No field data is committed here, and the `.gitignore` is written to keep it that
 ## Caveats
 
 Standard LB-SPR assumptions carry over: equilibrium, asymptotic selectivity. Life-history values are
-literature-derived with a single FL:TL ratio across species, so the intervals are wide. The male
-floor is a precautionary bound, not an estimate of fertilisation success. Two intervals are reported
-per species; the parameter Monte-Carlo is the wider and the more honest at these sample sizes, and
-is the one to read as the working uncertainty.
+literature-derived with a single FL:TL ratio across species, so the intervals are wide. Two intervals
+are reported per species; the parameter Monte-Carlo is the wider and the more honest at these sample
+sizes, and is the one to read as the working uncertainty.
+
+The male-capacity ratio carries no established reference point and is read against parity, never
+against the 0.20 and 0.40 zones. It bounds the risk of male limitation rather than estimating
+fertilisation success, because the mating function relating sex ratio to realised reproduction is
+unknown for these species.
+
+**The egg-based status assumes a fixed sex-change schedule, and cannot check that assumption.** The
+stress battery in `03` shows it is blind to compensatory sex change: if females convert earlier as
+large males are removed, true egg production falls steeply while the length composition barely moves,
+and the estimator returns an unchanged value. In simulation, the correct status zone is recovered in
+essentially none of the replicates under the mildest compensation tested. Nothing in length data can
+distinguish a fixed schedule from a plastic one. Where compensation is occurring the egg-based status
+is optimistic, and the male ratio is the quantity that moves first, which is the main reason to report
+both.
 
 ## Credits
 
