@@ -30,3 +30,4 @@ adopted value sits at the edge of what the source supports. Read it before quoti
 any species here**: it is set at 1.10 × LD50 throughout. The ogive width is therefore an assumption
 applied uniformly across all twelve functional hermaphrodites, and the pipeline sweeps it as a
 sensitivity axis for that reason.
+
