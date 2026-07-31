@@ -35,13 +35,55 @@ MAX_PX   <- 760L   # longest edge of each embedded photo (lower -> smaller HTML)
 QUALITY  <- 80L    # embedded JPEG quality
 OUT_HTML <- here("catalog", "fish_catalog.html")
 
+# Cross-dataset de-duplication, matching 02_analysis.R. A fish caught during the season and also
+# logged by the government tagging programme carries a different id in each file, so it survives
+# distinct(fish_id) as two records. 01_combine_data.R resolves those and 02_analysis.R now honours
+# that resolution; the catalogue must too, or its specimen count contradicts the paper's.
+#
+# THE TRADE-OFF, stated because it is not free: the resolution keeps the historical row, which has
+# no photograph, and discards the app row, which does. Filtering therefore costs the catalogue one
+# photograph. Set FALSE to keep every photographed record, and expect the catalogue's n to exceed
+# the paper's by the number of duplicates.
+DEDUPE_CATALOG <- TRUE
+COMBINED_CSV   <- here("combined_records", "combined_dataset.csv")
+SEASON_LABEL   <- "2026 season"
+
+# Vernacular names: the HMGoG list is canonical and the app uses angler-facing names. Same map as
+# 01_combine_data.R and 02_analysis.R, so the catalogue, the figures and the tables cannot label
+# one species three ways. Keep these three copies identical.
+common_fix <- c(
+  "Pagrus auriga"              = "Redbanded Seabream",
+  "Diplodus cervinus cervinus" = "Soldier Seabream",
+  "Pagellus acarne"            = "Bronze Seabream",
+  "Pagrus pagrus"              = "Common Seabream"
+)
+
 # ---- 1. LOAD  (same auto-discovering loader as analysis.R) ----------
 raw <- list.files(here("all_records"), pattern = "^bream_.*\\.csv$", full.names = TRUE) |>
   set_names(basename) |>
   map(\(f) read_csv(f, na = c("", "NA", "NR"), show_col_types = FALSE)) |>
   list_rbind() |>
   clean_names() |>
-  distinct(fish_id, .keep_all = TRUE)
+  distinct(fish_id, .keep_all = TRUE) |>
+  mutate(common_name = coalesce(unname(common_fix[scientific_name]), common_name))
+
+if (isTRUE(DEDUPE_CATALOG)) {
+  if (file.exists(COMBINED_CSV)) {
+    keep <- read_csv(COMBINED_CSV, na = c("", "NA", "NR"), show_col_types = FALSE) |>
+      clean_names() |>
+      dplyr::filter(dataset == SEASON_LABEL, !is.na(fish_id)) |>
+      dplyr::pull(fish_id)
+    dropped <- setdiff(raw$fish_id, keep)
+    raw <- raw |> dplyr::filter(fish_id %in% keep)
+    if (length(dropped))
+      message(sprintf("[catalog] %d cross-dataset duplicate(s) removed: %s. Catalogue n = %d, matching the analysis.",
+                      length(dropped), paste(dropped, collapse = ", "), nrow(raw)))
+  } else {
+    warning("[catalog] ", basename(COMBINED_CSV), " not found - de-duplication SKIPPED. ",
+            "The catalogue's specimen count may exceed the analysis's. Run 01_combine_data.R first.",
+            call. = FALSE)
+  }
+}
 
 # ---- 2. ASSEMBLE SPECIMEN RECORDS -----------------------------------
 catalog <- raw |>

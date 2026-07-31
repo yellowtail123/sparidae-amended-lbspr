@@ -59,10 +59,12 @@ suppressPackageStartupMessages({
   library(skimr)
   library(sf)
   library(leaflet)
-  library(FishLife)
-  library(fishmethods)
-  library(TropFishR)
 })
+# NOTE: FishLife, fishmethods and TropFishR are NOT attached here. They were, and a hard
+# library() call inside this block defeated the guarded design: a missing GitHub-only or
+# fragile CRAN package halted the script before line 100 rather than skipping its section.
+# Every call to them in this file is namespace-qualified (TropFishR::, FishLife::), so a
+# requireNamespace() guard is sufficient and nothing needs attaching.
 
 # Attach optional packages if present; otherwise mark the section to skip.
 need <- function(pkg) {
@@ -71,14 +73,20 @@ need <- function(pkg) {
   else message(sprintf("[skip] package '%s' not installed - its section will be skipped.", pkg))
   ok
 }
+# have_*: TRUE if usable. Packages called only via pkg::fun() are checked with
+# requireNamespace() and never attached; the rest go through need().
 have_vegan <- need("vegan")
 have_inext <- need("iNEXT")
 have_lbspr <- need("LBSPR")
-have_fishmethods <- need("fishmethods")   # empirical M estimators (Section 7b)
+have_fishmethods <- requireNamespace("fishmethods", quietly = TRUE)  # empirical M estimators (Section 7b)
 have_fishlife  <- requireNamespace("FishLife",  quietly = TRUE)   # multivariate LH covariance (GitHub: james-thorson/FishLife)
 have_rfishbase <- requireNamespace("rfishbase", quietly = TRUE)   # FishBase audit (CRAN)
 have_tropfishr <- requireNamespace("TropFishR", quietly = TRUE)   # length-converted catch curve (CRAN)
 have_geo   <- requireNamespace("geosphere", quietly = TRUE)   # for commented movement block
+for (.p in c("FishLife", "fishmethods", "TropFishR"))
+  if (!requireNamespace(.p, quietly = TRUE))
+    message(sprintf("[skip] package '%s' not installed - its section will be skipped.", .p))
+rm(.p)
 
 select <- dplyr::select
 filter <- dplyr::filter
@@ -102,7 +110,9 @@ MIN_N_IND     <- 10     # min MEASURED lengths before a species gets length-indi
 # - uncertainty: length bootstrap + parameter Monte-Carlo (life-history) -
 # Monte-Carlo reps. FINAL_RUN = TRUE for camera-ready (2000); FALSE for fast iteration (1000).
 # 9999 was overkill: a percentile CI is already stable by ~2000 full GTG fits, at a fraction of the runtime.
-FINAL_RUN     <- FALSE
+# NOTE: this script and analysisfinal.Rmd write the SAME files into results/. Keep FINAL_RUN
+# identical in both, or the reported intervals depend on which was run last.
+FINAL_RUN     <- TRUE
 N_BOOT        <- if (FINAL_RUN) 2000L else 1000L   # length-bootstrap reps for LBSPR
 N_PARAM_MC    <- if (FINAL_RUN) 2000L else 1000L   # parameter Monte-Carlo draws (life-history)
 PARAM_MC_NESTED <- FALSE # TRUE -> also resample lengths within each draw (parameter + sampling = total uncertainty)
@@ -131,8 +141,49 @@ TL_FL_RATIO      <- 0.92   # FL ≈ TL * 0.92  for deep-bodied seabreams
 # Sex system and length-at-sex-change live in the sex_info table in section 7.
 SEX_STRUCTURED_SPR <- TRUE   # FALSE -> behave exactly like standard LBSPR
 USE_FISHLIFE_CORR  <- TRUE   # TRUE -> FishLife correlation in the parameter MC; FALSE -> independent draws
-RUN_OM_SIM <- FALSE  # operating-model validation (slow). FALSE for normal runs; TRUE only to re-validate §Z.
-LDELTA_FACTOR      <- 1.10   # LD95 = LDELTA_FACTOR * LD50 when only LD50 is provided (ogive width)
+# MUST match analysisfinal.Rmd: both write the same files into results/, so a mismatch here
+# means the reported §3.6 numbers depend on which of the two was run last.
+RUN_OM_SIM <- TRUE   # operating-model validation (slow). Keep TRUE for camera-ready runs.
+# Replicates per sample size in the recovery simulation. This was hardcoded at 500 in the driver
+# below while the manuscript runs 1000, so with RUN_OM_SIM on, sourcing this file would have
+# quietly replaced the reported 1000-replicate results with a 500-replicate version. Driven from
+# FINAL_RUN here, exactly as in the Rmd, so the two cannot disagree.
+N_OM_REP <- if (FINAL_RUN) 1000L else 500L
+
+# --- sex-change ogive: LOCATION and WIDTH ---------------------------------
+# LDELTA_FACTOR sets the ogive WIDTH as LD95 = LDELTA_FACTOR * LD50. It is described in the
+# parameter file as a fallback, but NO species in the assemblage ships a measured LD95, so in
+# practice it is applied to all twelve hermaphrodites. It is therefore an assumption, not a
+# fallback, and both sensitivity axes below exist because of that.
+LDELTA_FACTOR <- 1.10   # LD95 = LDELTA_FACTOR * LD50 (applied to every hermaphrodite; see above)
+# LOCATION sweep: shift LD50 by these multipliers, carrying the fitted width.
+LD_MULT  <- c(0.8, 1.0, 1.2)
+# WIDTH sweep: hold LD50 and set LD95 = multiplier * LD50. The upper end is not arbitrary --
+# the workbook's own note for Spondyliosoma cantharus ("widen ogive, no females >35cm") puts
+# LD95 at 35 cm TL, which is 1.40 * LD50 for that species.
+LDW_MULT <- c(1.10, 1.20, 1.30, 1.40, 1.50)
+
+# - figure text: where the descriptive text lives -------------------------
+# FALSE exports every PNG BARE: no title, no subtitle, no plot caption. Axis titles and
+# legends are always kept, because a shape or colour key cannot be replaced by prose without
+# making the reader count marker types. This matches the manuscript's convention, where the
+# whole description sits in the Word legend paragraph beneath the figure and the image itself
+# carries none. The labs() calls below are NOT deleted: they remain the source text, and are
+# written to results/figure_legends.txt at the end of the run for pasting into the document.
+FIG_TEXT <- FALSE
+
+# Strip in-figure text for export while leaving the plot object untouched.
+bare_fig <- function(p) {
+  if (isTRUE(FIG_TEXT) || is.null(p)) return(p)
+  p + ggplot2::labs(title = NULL, subtitle = NULL, caption = NULL)
+}
+# Pull the text back out, so the legends file is generated from the same source and cannot
+# drift from what the figure would have said.
+fig_text_of <- function(p) {
+  if (is.null(p)) return(NULL)
+  l <- p$labels
+  list(title = l$title, subtitle = l$subtitle, caption = l$caption)
+}
 
 # Local timezone for the diurnal/nocturnal split. Your timestamps are stored in UTC;
 # Gibraltar is UTC+1 (winter) / UTC+2 (summer). Day/night must be judged in LOCAL time
@@ -151,6 +202,11 @@ LOCAL_TZ <- "Europe/Gibraltar"
 # halt Section 7 with "object 'b' not found". If you keep the file under a different name in
 # the project root, change only this string.
 PARAM_CSV <- here("Sparid_LBSPR_LifeHistory_trinomial_Rready.csv")
+
+# - combined file: written by 01_combine_data.R; read in Section 1 (de-duplication) and
+#   Section 13 (recaptures). Defined once here so the two uses cannot drift apart. -
+COMBINED_CSV <- here("combined_records", "combined_dataset.csv")
+SEASON_LABEL <- "2026 season"   # the value 01_combine_data.R writes into `dataset`
 
 dir.create(here("graphs and maps"), showWarnings = FALSE)
 dir.create(here("results"),         showWarnings = FALSE)
@@ -203,26 +259,80 @@ theme_bream <- function(base_size = 13) {
 theme_set(theme_bream())
 
 # =====================================================================
-# 1. LOAD  — auto-discovers every bream_*.csv in all_records/
+# 1. LOAD  — every bream_*.csv in all_records/, de-duplicated against the historical set
 # =====================================================================
-raw <- list.files(here("all_records"), pattern = "^bream_.*\\.csv$", full.names = TRUE) |>
+# distinct(fish_id) removes duplicates WITHIN the app exports. It cannot remove the
+# cross-dataset ones: a fish caught during the season and also logged by the government
+# tagging programme carries a different id in each file (HUR-... vs GOG-...), so it survives
+# as two records. 01_combine_data.R resolves those by collapsing records that share a TAG
+# NUMBER on the SAME calendar day, and that resolution used to reach only the combined
+# analysis. It now gates the season analysis too, which is why the season n is 230 and not
+# 231: HUR-36N5W-051026-LXWX-LH0P and GOG-051 are one Pagrus auriga caught on 2026-05-10
+# bearing tag 180, logged once by the angler and once by the programme.
+#
+# The filter is by fish_id rather than by reading lengths out of the combined file, and that
+# is deliberate. Combined lengths are on the TL scale (FL / 0.92); multiplying back by 0.92
+# is not exact in floating point, and on this dataset nine measured lengths would land in a
+# different 1 cm bin after the round trip. Keeping the app's FL values untouched avoids it.
+raw_all <- list.files(here("all_records"), pattern = "^bream_.*\\.csv$", full.names = TRUE) |>
   set_names(basename) |>
   map(\(f) read_csv(f, na = c("", "NA", "NR"), show_col_types = FALSE)) |>
   list_rbind(names_to = "source_file") |>
   clean_names() |>
   distinct(fish_id, .keep_all = TRUE)
 
+season_keep <- if (file.exists(COMBINED_CSV)) {
+  read_csv(COMBINED_CSV, na = c("", "NA", "NR"), show_col_types = FALSE) |>
+    clean_names() |>
+    dplyr::filter(dataset == SEASON_LABEL, !is.na(fish_id)) |>
+    dplyr::pull(fish_id)
+} else NULL
+
+if (is.null(season_keep)) {
+  raw <- raw_all
+  warning("[load] ", basename(COMBINED_CSV), " not found - cross-dataset de-duplication ",
+          "SKIPPED. Season counts will include any fish also logged in the historical set. ",
+          "Run 01_combine_data.R first.", call. = FALSE)
+} else {
+  raw <- raw_all |> dplyr::filter(fish_id %in% season_keep)
+  dropped <- setdiff(raw_all$fish_id, season_keep)
+  message(sprintf("[load] %d season records; %d cross-dataset duplicate(s) removed%s.",
+                  nrow(raw), length(dropped),
+                  if (length(dropped)) paste0(": ", paste(dropped, collapse = ", ")) else ""))
+  # A season id present in the exports but absent from the combined file for any reason OTHER
+  # than de-duplication would be silently lost, so make that loud rather than invisible.
+  if (length(dropped) > 2L)
+    warning("[load] ", length(dropped), " season records dropped by the de-duplication join. ",
+            "More than a couple is unexpected - check that 01_combine_data.R ran against the ",
+            "same all_records/ folder.", call. = FALSE)
+}
+
 if (interactive()) { glimpse(raw); print(skim(raw)) }   # console-only; skipped under batch source()
 
 # =====================================================================
 # 2. CLEAN
 # =====================================================================
+# Vernacular names: the HMGoG species list is canonical, the app uses angler-facing names, and
+# the two disagree. 01_combine_data.R already derives common_name from scientific_name for the
+# combined file; the SAME map is applied here so the season figures and the combined figures
+# cannot label one species two ways. Without it Pagrus auriga appears as "Hurta Seabream" in the
+# season figures and "Redbanded Seabream" in the combined ones. Anything unlisted keeps its
+# app name. Keep this vector identical to the one in 01_combine_data.R.
+common_fix <- c(
+  "Pagrus auriga"              = "Redbanded Seabream",
+  "Diplodus cervinus cervinus" = "Soldier Seabream",
+  "Pagellus acarne"            = "Bronze Seabream",
+  "Pagrus pagrus"              = "Common Seabream"
+)
+
 cleaned <- raw |>
   mutate(
     had_existing_tag = as.logical(had_existing_tag),
     was_tagged       = as.logical(was_tagged),
     has_photo        = as.logical(has_photo),
-    
+
+    common_name = coalesce(unname(common_fix[scientific_name]), common_name),
+
     date          = ymd(date),
     timestamp_utc = as_datetime(timestamp_utc),
     
@@ -365,7 +475,10 @@ lengthspecies <- cleaned |>
              fct_reorder(common_name, length_true_cm, median, .na_rm = TRUE))) +
   geom_boxplot(fill = scales::alpha(BREAM$gold, 0.5), colour = BREAM$gold_dark,
                outlier.shape = NA, width = 0.6, linewidth = 0.4) +
-  geom_jitter(height = 0.16, size = 1.9, alpha = 0.5, colour = BREAM$ink) +
+  # width = 0 for the same reason height = 0 is set in the diel figure: the UNSET axis gets
+  # ggplot2's default jitter, and here the unset axis (x) is fork length. Only the categorical
+  # axis may be jittered.
+  geom_jitter(height = 0.16, width = 0, size = 1.9, alpha = 0.5, colour = BREAM$ink) +
   labs(title = "Size range of each species",
        subtitle = "Box = middle 50% of fish, line = median, dots = individual fish",
        x = "Fork length (cm)", y = NULL,
@@ -1062,12 +1175,15 @@ pct_ci <- function(df, metrics) {
 # Magnusson 2013 - the length bootstrap is the most overconfident of the standard methods).
 # This draws those inputs from distributions, refits, and pushes each draw through the same
 # fit_lbspr_one() -> spr_sex_structured() path, giving a CI on the quantity that matters.
-#   - independent multiplicative (lognormal) draws by default, spreads set by PARAM_MC_CV.
-#     A correlated multivariate draw (Nadon 2016) is the refinement, but needs a covariance
-#     we do not have, so independent draws are the honest default here.
+#   - multiplicative (lognormal) draws, spreads set by PARAM_MC_CV, CORRELATED across
+#     (Linf, K, M, L50) through the FishLife covariance obtained in section 7c whenever one is
+#     available (curated centres, our marginal sigmas, FishLife dependence; Nadon 2016). Species
+#     that FishLife cannot match, or a run with USE_FISHLIFE_CORR = FALSE, fall back to
+#     independent draws.
 #   - PARAM_MC_NESTED = TRUE also resamples the lengths inside each draw, so the interval
 #     reflects parameter + sampling uncertainty together (total uncertainty).
-#   - ordering kept consistent: L95 = L95_FACTOR*L50 (as in the main pipeline), LD95 > LD50.
+#   - ordering kept consistent: L95 is scaled with the drawn L50 so the ADOPTED workbook
+#     L95/L50 ratio is preserved (L95_FACTOR is a blank-cell fallback only), and LD95 > LD50.
 # The bootstrap is retained alongside as the bias diagnostic, exactly as before.
 rlnorm_mult <- function(x, cv) x * exp(stats::rnorm(1L, 0, cv))   # multiplicative jitter, keeps sign
 
@@ -1158,63 +1274,94 @@ if (nrow(param_results)) {
   write_csv(param_ci, here("results", "lbspr_param_mc_ci.csv"))
 } else param_ci <- tibble()
 
+# Both interval tracks already carry SPR_fem (it is in boot_metrics / pmc_metrics above), so
+# the draws exist on disk; they were simply never joined into the display table. SPR_fem is now
+# the REPORTED status (see 10b), so it needs its interval next to it, and pulling it costs
+# nothing beyond the join. Helper avoids writing the same four lines four times.
+ci_cols <- function(ci, metric_name, prefix) {
+  out <- ci |> dplyr::filter(metric == metric_name) |>
+    dplyr::select(scientific_name, lo95, hi95)
+  if (!nrow(out)) return(NULL)
+  stats::setNames(out, c("scientific_name", paste0(prefix, c("_lo95", "_hi95"))))
+}
+
 if (nrow(assess_results)) {
   assess_display <- assess_results
   if (nrow(boot_ci)) {
-    spr_ci <- boot_ci |> filter(metric == "SPR") |>
-      transmute(scientific_name, SPR_lo95 = lo95, SPR_hi95 = hi95)
-    fm_ci  <- boot_ci |> filter(metric == "FM") |>
-      transmute(scientific_name, FM_lo95 = lo95, FM_hi95 = hi95)
-    assess_display <- assess_display |>
-      left_join(spr_ci, by = "scientific_name") |>
-      left_join(fm_ci,  by = "scientific_name")
+    for (j in list(ci_cols(boot_ci, "SPR",     "SPR"),
+                   ci_cols(boot_ci, "SPR_fem", "SPRf"),   # status quantity
+                   ci_cols(boot_ci, "FM",      "FM")))
+      if (!is.null(j)) assess_display <- left_join(assess_display, j, by = "scientific_name")
   }
   if (nrow(param_ci)) {        # parameter-MC interval reported next to the bootstrap one
-    spr_pmc <- param_ci |> filter(metric == "SPR") |>
-      transmute(scientific_name, SPR_pmc_lo95 = lo95, SPR_pmc_hi95 = hi95)
-    fm_pmc  <- param_ci |> filter(metric == "FM") |>
-      transmute(scientific_name, FM_pmc_lo95 = lo95, FM_pmc_hi95 = hi95)
-    assess_display <- assess_display |>
-      left_join(spr_pmc, by = "scientific_name") |>
-      left_join(fm_pmc,  by = "scientific_name")
+    for (j in list(ci_cols(param_ci, "SPR",     "SPR_pmc"),
+                   ci_cols(param_ci, "SPR_fem", "SPRf_pmc"),
+                   ci_cols(param_ci, "FM",      "FM_pmc")))
+      if (!is.null(j)) assess_display <- left_join(assess_display, j, by = "scientific_name")
     message("CIs below: *_lo95/_hi95 = length bootstrap (sampling only); ",
             "*_pmc_lo95/_pmc_hi95 = parameter Monte-Carlo (life-history). The latter is ",
-            "usually wider and is the more honest interval in data-poor LBSPR.")
+            "usually wider and is the more honest interval in data-poor LBSPR. ",
+            "SPRf_* are the intervals on the sex-structured FEMALE (egg) ratio, which is the ",
+            "quantity read against the 0.20 / 0.40 reference points.")
   }
-  print(assess_display)        # SPR/FM with bootstrap + parameter-MC 95% CIs where available
-  write_csv(assess_results, here("results", "assessment_results.csv"))
+  print(assess_display)        # SPR / SPR_fem / FM with bootstrap + parameter-MC 95% CIs
+  write_csv(assess_display, here("results", "assessment_results.csv"))
 }
 
 # ---- 10b output: sex-structured SPR vs standard LBSPR ----------------
 if (isTRUE(SEX_STRUCTURED_SPR) && nrow(assess_results) &&
     "SPR_bind" %in% names(assess_results)) {
+  # STATUS QUANTITY. SPR_female is the reported status and is what the 0.20 / 0.40 reference
+  # points are read against, because those points (Goodyear 1993) are defined for spawning
+  # OUTPUT per recruit and SPR_female is the egg-based ratio. SPR_male is a mature-male BIOMASS
+  # ratio; it has no established reference point, it declines far faster in F/M than either
+  # egg-based ratio (it crosses 0.20 at F/M ~ 1.1-1.3 for the two protogynous species here, so a
+  # stock fished at F = M would be classed overfished almost automatically), and it is therefore
+  # reported as an unscaled DIAGNOSTIC, never zone-shaded. SPR_binding = min(female, male) is
+  # retained in the output for continuity and audit but is NOT the reported status.
+  # male_deficit = SPR_male / SPR_female is the scale-free reading of the same signal: ~1 means
+  # no sex-structured effect, < 1 means male capacity is the depleted arm, > 1 means the egg
+  # producers are. It needs no reference point, which is the point of it.
   sex_compare <- assess_results |>
     transmute(
-      scientific_name, n, sex_system, sex_applied,
-      SPR_package = round(SPR, 3),            # standard LBSPR (gonochore-implicit)
-      SPR_check   = round(SPR_gono_check, 3), # our replica of the same (validates the engine)
-      SPR_female  = round(SPR_fem, 3),        # sex-structured egg-SPR (package-anchored)
-      SPR_male    = round(SPR_male, 3),       # male-capacity ratio (protogyny floor, anchored)
-      SPR_binding = round(SPR_bind, 3),       # status to report (anchored)
-      anchor      = round(anchor_factor, 3),  # package/replica ratio applied; ~1.000 = replica matches package
-      shift       = round(SPR_bind - SPR, 3)  # how far the correction moves the headline
+      scientific_name, n, sex_system, sex_applied, reliable,
+      SPR_package  = round(SPR, 3),            # standard LBSPR (gonochore-implicit)
+      SPR_check    = round(SPR_gono_check, 3), # our replica of the same (validates the engine)
+      SPR_female   = round(SPR_fem, 3),        # STATUS: sex-structured egg-SPR (package-anchored)
+      zone         = as.character(cut(SPR_fem, c(-Inf, 0.20, 0.40, Inf),
+                                      labels = c("overfished", "cautionary", "healthy"))),
+      SPR_male     = round(SPR_male, 3),       # DIAGNOSTIC: mature-male biomass ratio (anchored)
+      male_deficit = round(SPR_male / SPR_fem, 3),   # < 1 -> male capacity is the depleted arm
+      SPR_binding  = round(SPR_bind, 3),       # retained for audit; NOT the reported status
+      anchor       = round(anchor_factor, 3),  # package/replica ratio applied; ~1.000 = replica matches package
+      shift        = round(SPR_fem - SPR, 3)   # effect of the amendment on EGG production
     ) |>
     arrange(sex_applied, scientific_name)
   message("\n============ SEX-STRUCTURED SPR  (vs standard LBSPR) ============")
-  message("Validation: SPR_package and SPR_check should now match to ~3 dp (selectivity fixed);")
-  message("the 'anchor' factor should sit at ~1.000. SPR_female/_male/_binding are package-anchored.")
-  message("Expectation: protandry -> SPR_female usually < package (safe, conservative);")
-  message("protogyny -> SPR_female often > package, so SPR_binding takes the male floor.")
+  message("Validation: SPR_package and SPR_check should match to ~3 dp (selectivity fixed);")
+  message("the 'anchor' factor should sit near 1.000. All SPR_* below are package-anchored.")
+  message("STATUS = SPR_female against 0.20 / 0.40. SPR_male is a biomass diagnostic with NO")
+  message("reference point; read it via male_deficit (SPR_male / SPR_female), not against zones.")
+  message("Expectation: protandry -> SPR_female < package and male_deficit > 1;")
+  message("protogyny -> SPR_female > package and male_deficit < 1.")
   print(sex_compare, n = Inf)
   message("================================================================\n")
   write_csv(sex_compare, here("results", "spr_sex_structured.csv"))
 }
 
-# ---- 10c output: LD50/LD95 sensitivity of the binding SPR (post-fit; no refit) -------
-# The amendment is post-fit, so the sex-change ogive can be perturbed WITHOUT refitting LBSPR. Each
-# assessed functional hermaphrodite is re-evaluated at LD50 x {0.8, 1.0, 1.2} (LD95 carried to hold
-# the ogive width; the base row is the headline fit itself). Writes results/ld_sensitivity.csv.
-if (isTRUE(SEX_STRUCTURED_SPR) && nrow(assess_results) && "SPR_bind" %in% names(assess_results)) {
+# ---- 10c output: sex-change ogive sensitivity (post-fit; no refit) -------------------
+# The amendment is post-fit, so the sex-change ogive can be perturbed WITHOUT refitting LBSPR.
+# TWO axes are swept, because the ogive has two free quantities and only one of them was being
+# tested:
+#   LOCATION  LD50 x LD_MULT, carrying the fitted width (the original sweep).
+#   WIDTH     LD95 = LDW_MULT x LD50, holding LD50 (new).
+# The width axis matters because NO species in this assemblage ships a measured LD95: every
+# hermaphrodite takes LD95 = LDELTA_FACTOR x LD50, so the width is an assumption applied
+# universally, and the location sweep deliberately holds it fixed. The workbook's own note for
+# Spondyliosoma cantharus asks for a wider ogive ("no females >35cm", i.e. LD95 ~ 1.40 x LD50).
+# Both axes report SPR_female (the status quantity) with its zone, and SPR_male alongside as the
+# unscaled diagnostic. Writes results/ld_sensitivity.csv (long, one row per species x axis x level).
+if (isTRUE(SEX_STRUCTURED_SPR) && nrow(assess_results) && "SPR_fem" %in% names(assess_results)) {
   ld_zone <- function(s) as.character(cut(s, c(-Inf, 0.20, 0.40, Inf),
                                           labels = c("overfished", "cautionary", "healthy")))
   ld_rows <- list()
@@ -1224,96 +1371,194 @@ if (isTRUE(SEX_STRUCTURED_SPR) && nrow(assess_results) && "SPR_bind" %in% names(
     if (!(lhr$sex_system %in% c("protandry", "protogyny")) || !is.finite(lhr$LD50)) next
     if (!isTRUE(fit_sp$reliable)) next                                                    # skip flagged (uninterpretable) fits
     width <- if (is.finite(lhr$LD95)) lhr$LD95 - lhr$LD50 else (LDELTA_FACTOR - 1) * lhr$LD50
-    for (m in c(0.8, 1.0, 1.2)) {
-      LD50m <- lhr$LD50 * m; LD95m <- LD50m + width
-      if (m == 1.0) {
+
+    # (LD50, LD95) pairs to evaluate, tagged by which axis generated them. is_base marks the
+    # headline fit, which is reused rather than recomputed so the table cannot disagree with it.
+    grid <- dplyr::bind_rows(
+      tibble(axis = "location", mult = LD_MULT,
+             LD50 = lhr$LD50 * LD_MULT, LD95 = lhr$LD50 * LD_MULT + width),
+      tibble(axis = "width",    mult = LDW_MULT,
+             LD50 = lhr$LD50,           LD95 = lhr$LD50 * LDW_MULT)
+    ) |>
+      mutate(is_base = abs(LD50 - lhr$LD50) < 1e-9 & abs(LD95 - lhr$LD95) < 1e-9)
+
+    for (i in seq_len(nrow(grid))) {
+      g <- grid[i, ]
+      if (isTRUE(g$is_base)) {
         SPR_fem <- fit_sp$SPR_fem; SPR_male <- fit_sp$SPR_male; SPR_bind <- fit_sp$SPR_bind
       } else {
         sx <- spr_sex_structured(
           FM = fit_sp$FM, SL50 = fit_sp$SL50, SL95 = fit_sp$SL95,
           Linf = lhr$Linf, MK = lhr$MK, L50 = lhr$L50, L95 = lhr$L95,
           FecB = lhr$FecB, CVLinf = lhr$CVLinf,
-          sex_system = lhr$sex_system, LD50 = LD50m, LD95 = LD95m,
+          sex_system = lhr$sex_system, LD50 = g$LD50, LD95 = g$LD95,
           anchor_SPR = fit_sp$SPR, MaleExp = lhr$b, binwidth = BINWIDTH)
         SPR_fem <- sx$SPR_fem; SPR_male <- sx$SPR_male; SPR_bind <- sx$SPR_bind
       }
       ld_rows[[length(ld_rows) + 1]] <- tibble(
-        scientific_name = sp, sex_system = lhr$sex_system, LD_mult = m,
-        LD50 = LD50m, LD95 = LD95m,
-        SPR_fem = SPR_fem, SPR_male = SPR_male, SPR_bind = SPR_bind, zone = ld_zone(SPR_bind))
+        scientific_name = sp, sex_system = lhr$sex_system,
+        axis = g$axis, mult = g$mult, is_base = g$is_base,
+        LD50 = g$LD50, LD95 = g$LD95,
+        SPR_fem = SPR_fem, zone = ld_zone(SPR_fem),          # STATUS + its zone
+        SPR_male = SPR_male,                                  # diagnostic, no zone
+        male_deficit = SPR_male / SPR_fem,
+        SPR_bind = SPR_bind)                                  # retained for audit only
     }
   }
   if (length(ld_rows)) {
     ld_sensitivity <- bind_rows(ld_rows)
     write_csv(ld_sensitivity, here("results", "ld_sensitivity.csv"))
-    message("\n============ LD50/LD95 SENSITIVITY (binding SPR at +/-20% sex-change ogive) ============")
-    print(ld_sensitivity, n = Inf)
-    message("========================================================================================\n")
+    # per-species, per-axis span of the STATUS quantity, and whether it changes zone
+    ld_span <- ld_sensitivity |>
+      group_by(scientific_name, sex_system, axis) |>
+      summarise(SPR_fem_lo = min(SPR_fem), SPR_fem_hi = max(SPR_fem),
+                zone_changes = dplyr::n_distinct(zone) > 1,
+                SPR_male_lo = min(SPR_male), SPR_male_hi = max(SPR_male),
+                .groups = "drop")
+    write_csv(ld_span, here("results", "ld_sensitivity_span.csv"))
+    message("\n============ SEX-CHANGE OGIVE SENSITIVITY (location AND width) ============")
+    message("Reported status is SPR_fem; zone_changes = TRUE marks an ogive-sensitive conclusion.")
+    print(ld_span, n = Inf)
+    message("==========================================================================\n")
   }
 }
 
 # ---- assessment figures (LBSPR-only): SPR stoplight + F/M ------------
-spr_status <- NULL; fishing_pressure <- NULL
+spr_status <- NULL; fishing_pressure <- NULL; spr_male_diag <- NULL
 if (nrow(assess_results)) {
   asd <- assess_results |> left_join(sp_lookup, by = "scientific_name")
   if (nrow(boot_ci)) {
     asd <- asd |>
       left_join(boot_ci |> filter(metric == "SPR") |>
                   select(scientific_name, spr_lo = lo95, spr_hi = hi95), by = "scientific_name") |>
+      left_join(boot_ci |> filter(metric == "SPR_fem") |>      # interval on the STATUS quantity
+                  select(scientific_name, sprf_lo = lo95, sprf_hi = hi95), by = "scientific_name") |>
       left_join(boot_ci |> filter(metric == "FM") |>
                   select(scientific_name, fm_lo = lo95, fm_hi = hi95),  by = "scientific_name")
   }
   
-  # (a) SPR stoplight: the headline status figure
-  asd_spr <- asd |> mutate(common_name = fct_reorder(common_name, SPR))
-  spr_err <- if (all(c("spr_lo", "spr_hi") %in% names(asd_spr))) {
+  # Flagged fits (estimated F/M above FM_CEIL) are reported but NOT interpreted, so they must be
+  # visually distinct. Previously every species was drawn identically, which meant the figure
+  # interpreted the flagged fit for any reader who looks at figures before text.
+  # `%in% TRUE` rather than the bare logical: a fit whose FM is NA gives reliable = NA, and
+  # if_else would then propagate NA into the factor and silently drop the point.
+  asd <- asd |> mutate(rel_lab = if_else(reliable %in% TRUE, "reliable", "flagged: not interpreted"),
+                       rel_lab = factor(rel_lab, levels = c("reliable", "flagged: not interpreted")))
+  REL_SHAPE <- c("reliable" = 21, "flagged: not interpreted" = 24)   # circle vs open triangle
+  REL_ALPHA <- c("reliable" = 1,  "flagged: not interpreted" = 0.45)
+
+  # The plotted status is SPR_fem when the amendment is on and the standard SPR when it is off,
+  # so this figure does not depend on SEX_STRUCTURED_SPR being TRUE. Named once here rather than
+  # repeated, so the axis, the ordering and the interval cannot end up on different quantities.
+  has_sex <- isTRUE(SEX_STRUCTURED_SPR) && "SPR_fem" %in% names(asd)
+  asd <- asd |> mutate(SPR_status = if (has_sex) SPR_fem else SPR)
+  if (has_sex && all(c("sprf_lo", "sprf_hi") %in% names(asd))) {
+    asd <- asd |> mutate(status_lo = sprf_lo, status_hi = sprf_hi)
+  } else if (all(c("spr_lo", "spr_hi") %in% names(asd))) {
+    asd <- asd |> mutate(status_lo = spr_lo, status_hi = spr_hi)
+  }
+
+  # (a) SPR stoplight: the headline status figure.
+  # STATUS = SPR_fem (sex-structured, egg-based). The zone shading belongs to it and to it alone,
+  # because the 0.20 / 0.40 points are spawning-OUTPUT reference points. The gold circle is the
+  # standard gonochoristic fit and the dotted segment shows what accounting for sex change does
+  # to egg production: it RAISES it for protogyny and lowers it for protandry.
+  asd_spr <- asd |> mutate(common_name = fct_reorder(common_name, SPR_status))
+  spr_err <- if (all(c("status_lo", "status_hi") %in% names(asd_spr))) {
     geom_segment(data = asd_spr,
-                 aes(x = spr_lo, xend = spr_hi, y = common_name, yend = common_name),
+                 aes(x = status_lo, xend = status_hi, y = common_name, yend = common_name),
                  colour = BREAM$ink, linewidth = 0.7)
   } else NULL
-  # sex-structured SPR overlay: white diamond at the binding SPR + dotted shift line
-  spr_sex_layer <- if (isTRUE(SEX_STRUCTURED_SPR) && "SPR_bind" %in% names(asd_spr)) {
+  spr_shift_layer <- if (has_sex) {
     list(
       geom_segment(data = asd_spr,
-                   aes(x = SPR, xend = SPR_bind, y = common_name, yend = common_name),
+                   aes(x = SPR, xend = SPR_status, y = common_name, yend = common_name),
                    colour = BREAM$ink, linewidth = 0.4, linetype = "dotted"),
-      geom_point(data = asd_spr, aes(x = SPR_bind, y = common_name),
-                 size = 3.4, shape = 23, fill = "white", colour = BREAM$ink, stroke = 0.8)
+      geom_point(data = asd_spr, aes(x = SPR, y = common_name),
+                 size = 3.2, shape = 21, fill = BREAM$gold, colour = BREAM$ink, stroke = 0.7)
     )
   } else NULL
-  spr_status <- ggplot(asd_spr, aes(SPR, common_name)) +
+  spr_status <- ggplot(asd_spr, aes(SPR_status, common_name)) +
     annotate("rect", xmin = 0,    xmax = 0.20, ymin = -Inf, ymax = Inf, fill = ZONE_FILL[["Overfished"]]) +
     annotate("rect", xmin = 0.20, xmax = 0.40, ymin = -Inf, ymax = Inf, fill = ZONE_FILL[["Cautionary"]]) +
     annotate("rect", xmin = 0.40, xmax = Inf,  ymin = -Inf, ymax = Inf, fill = ZONE_FILL[["Healthy"]]) +
     geom_vline(xintercept = c(0.20, 0.40), colour = "white", linewidth = 0.8) +
+    spr_shift_layer +
     spr_err +
-    geom_point(size = 4.2, shape = 21, fill = BREAM$gold, colour = BREAM$ink, stroke = 0.8) +
-    spr_sex_layer +
+    geom_point(aes(shape = rel_lab, alpha = rel_lab),
+               size = 4.4, fill = BREAM$teal, colour = BREAM$ink, stroke = 0.9) +
+    scale_shape_manual(values = REL_SHAPE, name = NULL, drop = FALSE) +
+    scale_alpha_manual(values = REL_ALPHA, guide = "none") +
     scale_x_continuous(breaks = seq(0, 1, 0.2), expand = expansion(0)) +
     coord_cartesian(xlim = c(0, 1.04), clip = "off") +   # room at SPR=1 so markers/CIs aren't sliced
-    labs(title = "Spawning Potential Ratio (SPR): how much breeding capacity remains?",
-         subtitle = "Red < 0.20 overfished  ·  amber 0.20–0.40 cautionary  ·  green > 0.40 healthy",
-         x = "SPR   (0 = none left  →  1 = pristine)", y = NULL,
-         caption = "SPR = eggs from the fished stock ÷ eggs an unfished stock would make. Bars = bootstrap 95% confidence\n(wide = few fish + borrowed growth values). Read as INDICATIVE: LBSPR assumes a textbook fishery, so where\nthe catch lacks large fish (e.g. black seabream) SPR can be pushed down artificially.\nGold = standard LBSPR; white diamond = sex-structured SPR (eggs from females only; binding for protogynous species).")
-  
-  # (b) fishing pressure F/M, on a log axis (clipped) with the F = M reference line
+    labs(title = "Spawning potential ratio: how much egg production remains?",
+         subtitle = "Status is the sex-structured (female, egg-based) ratio  ·  red < 0.20 overfished  ·  amber 0.20–0.40 cautionary  ·  green > 0.40 healthy",
+         x = "Spawning potential ratio, SPR (0 = none left  →  1 = unfished)", y = NULL,
+         caption = "SPR = eggs from the fished stock / eggs an unfished stock would make. Teal = sex-structured female (egg) SPR, the reported status;\ngold = standard LBSPR, which treats every mature fish as an egg producer; the dotted segment is the effect of accounting for sex change.\nBars = bootstrap 95% confidence on the female ratio (wide = few fish + borrowed life history). Open triangles are fits flagged unreliable\n(estimated F/M above the ceiling) and are shown for completeness only. Mature-male biomass is a separate figure and a separate scale.")
+
+  # (a2) male-capacity diagnostic. DELIBERATELY a separate panel with NO zone shading: SPR_male is
+  # a mature-male BIOMASS ratio with no established reference point, and putting it on a shaded
+  # axis was the defect this split exists to fix. Plotted as the deficit ratio SPR_male/SPR_fem so
+  # it is read against 1 (parity between the two arms) rather than against 0.20.
+  if (isTRUE(SEX_STRUCTURED_SPR) && all(c("SPR_male", "SPR_fem") %in% names(asd))) {
+    asd_m <- asd |>
+      filter(is.finite(SPR_male), is.finite(SPR_fem), SPR_fem > 0) |>
+      mutate(deficit = SPR_male / SPR_fem,
+             common_name = fct_reorder(common_name, deficit))
+    if (nrow(asd_m)) spr_male_diag <- ggplot(asd_m, aes(deficit, common_name)) +
+      geom_vline(xintercept = 1, linetype = "dashed", colour = "grey45", linewidth = 0.6) +
+      geom_segment(aes(x = 1, xend = deficit, y = common_name, yend = common_name),
+                   colour = BREAM$ink, linewidth = 0.5) +
+      geom_point(aes(shape = rel_lab, alpha = rel_lab),
+                 size = 4.4, fill = BREAM$gold_dark, colour = BREAM$ink, stroke = 0.9) +
+      scale_shape_manual(values = REL_SHAPE, name = NULL, drop = FALSE) +
+      scale_alpha_manual(values = REL_ALPHA, guide = "none") +
+      scale_x_log10() +
+      labs(title = "Male-capacity diagnostic: is one sex being depleted faster than the other?",
+           subtitle = "Mature-male biomass per recruit relative to female egg production per recruit  ·  no status zones apply to this quantity",
+           x = "SPR (male) / SPR (female)   (log scale; 1 = both arms equally depleted)", y = NULL,
+           caption = "Below 1, male capacity is the depleted arm, expected under protogyny because the largest fish are male and are taken first.\nAbove 1, the egg producers are, expected under protandry. This is a screening diagnostic, not a fertilisation estimate: the mating\nfunction relating sex ratio to realised reproduction is unknown for these species. It carries NO reference point and is deliberately\nnot read against the 0.20 / 0.40 zones, which are defined for spawning output.")
+  }
+
+  # (b) fishing pressure F/M, on a log axis with the F = M reference line
   asd_fm <- asd |> filter(is.finite(FM)) |> mutate(common_name = fct_reorder(common_name, FM))
   if (nrow(asd_fm)) {
-    fm_err <- if (all(c("fm_lo", "fm_hi") %in% names(asd_fm))) {
+    # Limits are taken FROM the intervals rather than imposed on them. The previous fixed window
+    # (0.05, 20) silently amputated two upper bounds at the panel edge, so 110.18 and 50.56 drew
+    # identically, and pmax(fm_lo, 0.05) redrew a bootstrap lower bound of zero at a readable
+    # 0.05. Both made the figure assert something the table does not.
+    fm_has_ci <- all(c("fm_lo", "fm_hi") %in% names(asd_fm))
+    FM_FLOOR  <- 0.01   # a true zero cannot be drawn on a log axis; this is the drawing floor
+    if (fm_has_ci) {
+      asd_fm <- asd_fm |>
+        mutate(fm_lo_drawn = pmax(fm_lo, FM_FLOOR),
+               lo_censored = fm_lo < FM_FLOOR)          # flagged in the caption, not hidden
+    }
+    fm_rng <- range(c(asd_fm$FM,
+                      if (fm_has_ci) c(asd_fm$fm_lo_drawn, asd_fm$fm_hi) else NULL,
+                      1), na.rm = TRUE)
+    fm_err <- if (fm_has_ci) {
       geom_segment(data = asd_fm,
-                   aes(x = pmax(fm_lo, 0.05), xend = fm_hi, y = common_name, yend = common_name),
+                   aes(x = fm_lo_drawn, xend = fm_hi, y = common_name, yend = common_name),
                    colour = BREAM$ink, linewidth = 0.7)
     } else NULL
+    n_cens <- if (fm_has_ci) sum(asd_fm$lo_censored, na.rm = TRUE) else 0L
     fishing_pressure <- ggplot(asd_fm, aes(FM, common_name)) +
       geom_vline(xintercept = 1, linetype = "dashed", colour = "grey45", linewidth = 0.6) +
       fm_err +
-      geom_point(size = 4.2, shape = 21, fill = BREAM$teal, colour = BREAM$ink, stroke = 0.8) +
+      geom_point(aes(shape = rel_lab, alpha = rel_lab),
+                 size = 4.4, fill = BREAM$teal, colour = BREAM$ink, stroke = 0.9) +
+      scale_shape_manual(values = REL_SHAPE, name = NULL, drop = FALSE) +
+      scale_alpha_manual(values = REL_ALPHA, guide = "none") +
       scale_x_log10(labels = scales::label_number(accuracy = 0.1)) +
-      coord_cartesian(xlim = c(0.05, 20)) +
+      coord_cartesian(xlim = c(fm_rng[1] * 0.8, fm_rng[2] * 1.25)) +   # show every limit in full
       labs(title = "Fishing pressure relative to natural mortality (F/M)",
            subtitle = "Below 1 = fishing removes fewer fish than nature does  ·  above 1 = fishing dominates",
            x = "F / M   (log scale)", y = NULL,
-           caption = "Dashed line = F equals M. Bars = bootstrap 95% confidence and are very wide at these sample sizes — treat\nF/M as a rough signal only. The black seabream estimate is especially unstable (its catch lacks large fish).")
+           caption = paste0(
+             "Dashed line = F equals M. Bars = bootstrap 95% confidence and are very wide at these sample sizes, so read F/M as a signal\nrather than a value. Open triangles are fits flagged unreliable (estimated F/M above the ceiling) and are not interpreted.",
+             if (n_cens > 0) sprintf("\n%d lower bound(s) reach zero and cannot be drawn on a logarithmic axis; they are shown from %.2f and are zero in the table.",
+                                     n_cens, FM_FLOOR) else ""))
   }
 }
 
@@ -1425,14 +1670,17 @@ if (n_night >= NIGHT_MIN_N) {
     filter(length_source == "measured") |>
     ggplot(aes(diel, length_true_cm, fill = diel)) +
     geom_boxplot(outlier.shape = NA, width = 0.6, colour = "grey30", alpha = 0.85) +
-    geom_jitter(width = 0.14, alpha = 0.45, size = 1.7, colour = "grey25") +
+    # height = 0 is REQUIRED. ggplot2 jitters BOTH axes by default (40% of the data resolution),
+    # so without it a point's plotted height is not that fish's length. The vertical axis here
+    # carries the measurement, and a measurement axis must not be jittered.
+    geom_jitter(width = 0.14, height = 0, alpha = 0.45, size = 1.7, colour = "grey25") +
     facet_wrap(~scientific_name, scales = "free_y",
                labeller = labeller(scientific_name = sci2com)) +
     scale_fill_manual(values = DIEL_COLS, guide = "none") +
     labs(title = "Do day and night catches differ in size?",
-         subtitle = "Night = the 11-12 July overnight tournament (batch-logged; see caption)",
+         subtitle = "Night = mostly the 11-12 July overnight tournament, batch-logged (see caption)",
          x = NULL, y = "Fork length (cm)",
-         caption = "Exploratory only: a single overnight event is confounded with date, moon phase and tide.")
+         caption = "Exploratory only. Most night records come from a single overnight event and are confounded with date, moon phase and tide;\na minority are individually timed after-dark captures on other dates. Night is assigned by local clock time except on the overnight\ntournament dates, whose batch-logged timestamps do not reflect true capture time and are assigned to night directly.")
   
   # per-species Mann-Whitney on length, where both periods have >= 5 fish
   daynight_tests <- cleaned |>
@@ -1489,55 +1737,88 @@ if (n_weight >= WEIGHT_MIN_N) {
 }
 
 # =====================================================================
-# 13. TAGGING  — live effort summary + (COMMENTED) movement analysis
+# 13. TAGGING  — live effort summary + movement / recapture analysis
 # =====================================================================
+# Effort counts come from the 2026 season records; RECAPTURES are counted against the COMBINED
+# dataset, because a fish bearing a historical tag carries its original release only there and
+# would otherwise be uncountable. 01_combine_data.R writes that file; if it is absent the counts
+# fall back to the season alone. Lengths in the combined file are on the TL scale and are put
+# back onto the FL catch scale here, so the growth increment below is in the same units as the
+# rest of the pipeline. This block mirrors the manuscript's tagging chunk exactly, so the two
+# write identical tagging_summary.csv and movement.csv.
+# COMBINED_CSV is defined once in the run-control block at the top of this file.
+combined_tag <- NULL
+if (file.exists(COMBINED_CSV)) {
+  combined_tag <- read_csv(COMBINED_CSV, na = c("", "NA", "NR"), show_col_types = FALSE) |>
+    clean_names() |>
+    mutate(
+      length_true_cm   = if_else(length_type %in% "TL" & !is.na(length_true_cm),
+                                 length_true_cm * TL_FL_RATIO, length_true_cm),   # TL -> FL
+      length_type      = if_else(!is.na(length_true_cm), "FL", length_type),
+      had_existing_tag = as.logical(had_existing_tag),
+      was_tagged       = as.logical(was_tagged),
+      date             = ymd(date)
+    )
+}
+recap_src <- if (!is.null(combined_tag)) combined_tag else cleaned
+n_recap   <- sum(!is.na(recap_src$recapture_of_fish_id))
+
 tag_summary <- cleaned |>
   summarise(
-    n_total          = n(),
-    n_newly_tagged   = sum(was_tagged, na.rm = TRUE),
-    n_existing_tag   = sum(had_existing_tag, na.rm = TRUE),
-    n_recaptures     = sum(!is.na(recapture_of_fish_id)),
-    tag_return_rate  = ifelse(sum(was_tagged, na.rm = TRUE) > 0,
-                              sum(!is.na(recapture_of_fish_id)) / sum(was_tagged, na.rm = TRUE), NA)
-  )
+    n_total        = n(),
+    n_newly_tagged = sum(was_tagged, na.rm = TRUE),
+    n_existing_tag = sum(had_existing_tag, na.rm = TRUE)
+  ) |>
+  mutate(n_recaptures    = n_recap,
+         tag_return_rate = ifelse(n_newly_tagged > 0, n_recap / n_newly_tagged, NA))
 print(tag_summary)
 write_csv(tag_summary, here("results", "tagging_summary.csv"))
 
-# -------- MOVEMENT / RECAPTURE ANALYSIS (kept commented until returns) -------
-# Un-comment this block once recapture_of_fish_id / days_at_liberty start to fill.
-# It needs the geosphere package for great-circle displacement.
-#
-# recaps <- cleaned |>
-#   filter(had_existing_tag | !is.na(recapture_of_fish_id))
-#
-# if (nrow(recaps) > 0 && have_geo) {
-#   # join each recapture back to its original tagging record by tag id
-#   originals <- cleaned |>
-#     filter(was_tagged) |>
-#     transmute(new_tag_id,
-#               orig_lat = latitude, orig_lon = longitude,
-#               orig_date = date, orig_len = length_true_cm)
-#   movement <- recaps |>
-#     left_join(originals, by = c("existing_tag_id" = "new_tag_id")) |>
-#     mutate(
-#       days_at_liberty = as.numeric(date - orig_date),
-#       displacement_km = geosphere::distHaversine(
-#         cbind(orig_lon, orig_lat), cbind(longitude, latitude)) / 1000,
-#       growth_increment_cm = length_true_cm - orig_len
-#     )
-#   write_csv(movement, here("results", "movement.csv"))
-#
-#   # movement vectors on the map
-#   movement_map <- leaflet() |>
-#     addProviderTiles("CartoDB.Positron") |>
-#     addCircleMarkers(data = movement, lng = ~orig_lon, lat = ~orig_lat,
-#                      radius = 4, color = "#2166ac", label = ~new_tag_id) |>
-#     addCircleMarkers(data = movement, lng = ~longitude, lat = ~latitude,
-#                      radius = 4, color = "#b2182b", label = ~existing_tag_id)
-#   # growth increments give a direct check on the VBGF for recaptured fish
-#   growth_check <- ggplot(movement, aes(days_at_liberty, growth_increment_cm)) +
-#     geom_point() + labs(title = "Growth increment vs days at liberty") + theme_bream()
-# }
+# -------- MOVEMENT / RECAPTURE ANALYSIS (threshold-gated; activates on the first return) -----
+# Each recapture is linked to its ORIGINAL release on the fish identifier: recapture_of_fish_id
+# on the recapture row equals fish_id on the release row, and identifiers are unique in the
+# assembled dataset, so the join is one-to-one. Displacement needs a fix at BOTH ends, so a
+# release logged as an anecdotal location name returns NA rather than a spurious distance.
+# All three objects are NULL-initialised so the figure-saving block runs whether or not returns
+# or geosphere exist.
+movement <- NULL; movement_map <- NULL; growth_check <- NULL
+
+recaps <- recap_src |> dplyr::filter(!is.na(recapture_of_fish_id))
+
+if (nrow(recaps) > 0 && have_geo) {
+  originals <- recap_src |>
+    dplyr::filter(was_tagged) |>
+    transmute(orig_fish_id = fish_id,
+              orig_lat = latitude, orig_lon = longitude,
+              orig_date = date, orig_len = length_true_cm)
+
+  movement <- recaps |>
+    left_join(originals, by = c("recapture_of_fish_id" = "orig_fish_id"),
+              relationship = "many-to-one") |>
+    mutate(
+      days_at_liberty     = as.numeric(date - orig_date),
+      displacement_km     = geosphere::distHaversine(
+                              cbind(orig_lon, orig_lat),
+                              cbind(longitude, latitude)) / 1000,
+      growth_increment_cm = length_true_cm - orig_len
+    )
+  write_csv(movement, here("results", "movement.csv"))
+
+  movement_map <- leaflet() |>
+    addProviderTiles("CartoDB.Positron") |>
+    addCircleMarkers(data = movement, lng = ~orig_lon, lat = ~orig_lat,
+                     radius = 4, color = "#2166ac",
+                     label = ~as.character(recapture_of_fish_id)) |>
+    addCircleMarkers(data = movement, lng = ~longitude, lat = ~latitude,
+                     radius = 4, color = "#b2182b",
+                     label = ~as.character(recapture_of_fish_id))
+
+  # the growth increment is the only internal check on the borrowed VBGF parameters
+  growth_check <- ggplot(movement, aes(days_at_liberty, growth_increment_cm)) +
+    geom_hline(yintercept = 0, colour = "grey70", linewidth = 0.4) +
+    geom_point(size = 2.8, colour = BREAM$teal) +
+    labs(x = "Days at liberty", y = "Growth increment (cm)")
+}
 
 # ===================================================================
 # §Z  OPERATING-MODEL SIMULATION  (validation of the SPR amendment)
@@ -1548,7 +1829,12 @@ write_csv(tag_summary, here("results", "tagging_summary.csv"))
 # ---- Stage 1: operating model — TRUE state of a known stock ----
 om_truth <- function(F_true, Linf = 35, K = 0.20, t0 = 0, M = 0.30,
                      L50 = 18, L95 = 22, a_lw = 0.01, b_lw = 3.0,
-                     sex = "protogyny", LD50 = 25, LD95 = 28,
+                     # LD95 defaults to the SAME width rule the assessment applies, rather than a
+                     # standalone number. It was 28 against LD50 = 25, a ratio of 1.12 that matched
+                     # nothing. Every driver passes both explicitly, so this default should never
+                     # fire; if it does without LDELTA_FACTOR in scope the error is the useful
+                     # outcome, because a silent 1.12 here would quietly de-validate the estimator.
+                     sex = "protogyny", LD50 = 25, LD95 = LDELTA_FACTOR * LD50,
                      sel50 = 16, sel95 = 21, amax = NULL, da = 0.1,
                      # ---- stress-test hooks (defaults reproduce the baseline) ----
                      sel_type = "logistic", desc50 = NULL, desc95 = NULL,  # dome selectivity
@@ -1591,8 +1877,27 @@ om_truth <- function(F_true, Linf = 35, K = 0.20, t0 = 0, M = 0.30,
   Z0 <- M + 0 * selA                               # unfished Z as a per-age vector
   surv_F <- c(1, head(exp(-cumsum(Z  * da)), -1))  # fished survivorship (age 0 = 1)
   surv_0 <- c(1, head(exp(-cumsum(Z0 * da)), -1))  # unfished
-  SPR_true <- sum(surv_F * mat * psi_f_F * Wa) / sum(surv_0 * mat * psi_f_0 * Wa)
-  list(SPR_true = SPR_true, La = La, catch_at_age = surv_F * selA, Linf = Linf)
+  # Per-recruit reference points, ONE PER REPORTED METRIC. Each estimator metric must be scored
+  # against its own truth: SPR_bind carries the male floor, so scoring it against the female-only
+  # ratio measures the floor rather than the misspecification under test, and puts a constant
+  # negative offset on the whole surface (including the correctly specified diagonal).
+  SPR_std_true  <- sum(surv_F * mat * Wa) / sum(surv_0 * mat * Wa)
+  SPR_fem_true  <- sum(surv_F * mat * psi_f_F * Wa) / sum(surv_0 * mat * psi_f_0 * Wa)
+  male_F        <- sum(surv_F * mat * (1 - psi_f_F) * Wa)
+  male_0        <- sum(surv_0 * mat * (1 - psi_f_0) * Wa)
+  SPR_male_true <- if (male_0 > 0) male_F / male_0 else NA_real_
+  SPR_bind_true <- if (sex == "protogyny")
+                     suppressWarnings(min(SPR_fem_true, SPR_male_true, na.rm = TRUE))
+                   else SPR_fem_true
+  # `ages` and `da` are returned so that 03's stressor 4 can draw ONE recruitment deviation
+  # per year class rather than one per age slice.
+  list(SPR_true      = SPR_fem_true,      # retained: the female ratio, as before
+       SPR_std_true  = SPR_std_true,
+       SPR_fem_true  = SPR_fem_true,
+       SPR_male_true = SPR_male_true,
+       SPR_bind_true = SPR_bind_true,
+       La = La, catch_at_age = surv_F * selA, Linf = Linf,
+       ages = ages, da = da)
 }
 
 # ---- Stage 2: observation — simulate n sampled lengths ----
@@ -1620,11 +1925,12 @@ make_length_sample <- function(om, n, CVlen = 0.10, binwidth = 1) {
 #     defaults to 0.10 to match the observation CV baked into make_length_sample();
 #   - fit_lbspr_one() returns NULL on non-convergence or a package error, which the
 #     replicate loops already treat as a dropped replicate.
-# NOTE: est also carries SPR_fem (the female-only egg SPR). It is the quantity that
-# should recover the OM's psi_f-weighted SPR_true; run_scenario()/run_stress() below
-# currently summarise SPR_std and SPR_bind only. Carry SPR_fem through if you want the
-# validation table to show the unbiased female estimator beside the naive SPR_std and
-# the precautionary SPR_bind (recommended when reporting the validation).
+# NOTE: est carries all three reported metrics. SPR_fem is the female-only egg SPR and is
+# the quantity that should recover the OM's psi_f-weighted truth; SPR_std is the replica's
+# gonochore-equivalent and SPR_bind the precautionary floor. run_scenario()/run_stress()
+# summarise all three, each scored against its OWN per-recruit truth, because scoring
+# SPR_bind against the female-only truth would measure the male floor rather than the
+# misspecification under test.
 estimate_from_sample <- function(samp, Linf, MK, L50, L95,
                                  sex, LD50, LD95, b_lw = 3, cvlinf = 0.10) {
   L <- rep(samp$Lmids, round(samp$counts))          # bin counts -> pseudo-lengths at midpoints
@@ -1664,31 +1970,62 @@ run_scenario <- function(F_true, n, R = 500, om_args = list(), est_args = list()
   n_conv <- nrow(out)                              # replicates that converged AND gave finite SPR
   if (n_conv == 0) {                               # nothing usable -> all-NA row, still report n & R
     na6 <- c(median = NA, lo = NA, hi = NA, cv = NA, bias = NA, p_correct = NA)
-    return(data.frame(n = n, SPR_true = om$SPR_true, R = R, n_converged = 0L,
+    return(data.frame(n = n,
+                      SPR_true = c(om$SPR_std_true, om$SPR_fem_true, om$SPR_bind_true),
+                      R = R, n_converged = 0L,
                       metric = c("SPR_std", "SPR_fem", "SPR_bind"),
                       rbind(na6, na6, na6), row.names = NULL))
   }
-  summ <- function(x) c(median = median(x), lo = unname(quantile(x, .1)),
+  truth_of <- c(SPR_std = om$SPR_std_true, SPR_fem = om$SPR_fem_true, SPR_bind = om$SPR_bind_true)
+  summ <- function(x, truth) c(median = median(x), lo = unname(quantile(x, .1)),
                         hi = unname(quantile(x, .9)), cv = sd(x) / mean(x),
-                        bias = median(x) - om$SPR_true,
-                        p_correct = mean(zone(x) == true_zone))
-  data.frame(n = n, SPR_true = om$SPR_true, R = R, n_converged = n_conv,
+                        bias = median(x) - truth,
+                        p_correct = mean(zone(x) == zone(truth)))
+  data.frame(n = n, SPR_true = unname(truth_of), R = R, n_converged = n_conv,
              metric = c("SPR_std", "SPR_fem", "SPR_bind"),
-             rbind(summ(out[, "SPR_std"]), summ(out[, "SPR_fem"]), summ(out[, "SPR_bind"])), row.names = NULL)
+             rbind(summ(out[, "SPR_std"],  truth_of[["SPR_std"]]),
+                   summ(out[, "SPR_fem"],  truth_of[["SPR_fem"]]),
+                   summ(out[, "SPR_bind"], truth_of[["SPR_bind"]])), row.names = NULL)
 }
 
 # ---- driver (expensive; gated) ----
+# ---- operating-model baseline stock: defined ONCE, used by §Z and by 03_stress_test.R ----
+# The sex-change ogive WIDTH is inherited from LDELTA_FACTOR rather than hardcoded. It used to be
+# LD50 = 25, LD95 = 28, a ratio of 1.12, while the assessment applies 1.10 to every hermaphrodite.
+# The simulation was therefore validating the estimator against a slightly different assumption
+# from the one the assessment makes, which is the one thing a validation must not do. Because no
+# species ships a measured LD95, that width is the assessment's single most exposed input, so the
+# operating model has to test the width the assessment actually uses.
+#
+# 03_stress_test.R reads these rather than declaring its own copies, so the recovery test and the
+# stressor battery cannot drift apart.
+OM_LD50 <- 25
+OM_LD95 <- LDELTA_FACTOR * OM_LD50
+OM_BASE_EST <- list(Linf = 35, MK = 1.5, L50 = 18, L95 = 22,
+                    sex = "protogyny", LD50 = OM_LD50, LD95 = OM_LD95)
+OM_BASE_OM  <- list(Linf = 35, K = 0.20, M = 0.30, L50 = 18, L95 = 22,
+                    sex = "protogyny", LD50 = OM_LD50, LD95 = OM_LD95,
+                    sel50 = 16, sel95 = 21)
+
 if (RUN_OM_SIM) {
   set.seed(42)
-  est_args <- list(Linf = 35, MK = 1.5, L50 = 18, L95 = 22,
-                   sex = "protogyny", LD50 = 25, LD95 = 28)
-  om_args  <- list(Linf = 35, K = 0.20, M = 0.30, L50 = 18, L95 = 22,
-                   sex = "protogyny", LD50 = 25, LD95 = 28, sel50 = 16, sel95 = 21)
+  est_args <- OM_BASE_EST
+  om_args  <- OM_BASE_OM
   grid <- expand.grid(n = c(10, 20, 30, 50, 75, 100, 200, 500), F_true = 0.45)
   res  <- do.call(rbind, Map(function(n, f)
-    run_scenario(f, n, R = 500, om_args = om_args, est_args = est_args),
+    run_scenario(f, n, R = N_OM_REP, om_args = om_args, est_args = est_args),
     grid$n, grid$F_true))
+  # p_correct is computed over CONVERGED replicates only, and non-convergence is not independent
+  # of the conditions being tested (a small sample or a strong stressor both push fits toward the
+  # boundary), so the conditioning event is informative and p_correct must never be reported
+  # without it. The rate is made an explicit column rather than left as n_converged / R arithmetic
+  # for whoever reads the results file.
+  res$conv_rate <- res$n_converged / res$R
   readr::write_csv(res, here::here("results", "om_simulation.csv"))
+  if (any(res$conv_rate < 0.9, na.rm = TRUE))
+    message(sprintf("[OM] convergence below 90%% in %d of %d cells (min %.2f); p_correct in those ",
+                    sum(res$conv_rate < 0.9, na.rm = TRUE), nrow(res), min(res$conv_rate, na.rm = TRUE)),
+            "cells is conditional on convergence - report conv_rate beside it.")
   print(res)
 }
 
@@ -1723,6 +2060,7 @@ plots <- list(
   rankabundance         = rankabund,
   size_vs_reference     = indicator_plot,
   spr_status            = spr_status,
+  spr_male_diagnostic   = spr_male_diag,
   fishing_pressure      = fishing_pressure,
   daynight_size         = daynight_size_plot,
   length_weight         = lw_plot,
@@ -1736,21 +2074,46 @@ fig_size <- list(
   daynight_size         = c(11, 7.5), length_weight      = c(11, 7.5),
   catchesspecies        = c(8, 5.5),  lengthspecies      = c(8.5, 6),
   spr_status            = c(10, 5.5), fishing_pressure   = c(9, 4.5),
+  spr_male_diagnostic   = c(9, 4.5),
   rankabundance         = c(9.5, 6.5), histogramlength   = c(9, 5.5),
   catchdate             = c(9, 5),    lengthwater        = c(9, 6)
 )
 iwalk(plots, function(p, name) {
   d <- fig_size[[name]]; if (is.null(d)) d <- c(9, 6)
   tryCatch(
-    ggsave(here("graphs and maps", paste0(name, ".png")), p,
+    ggsave(here("graphs and maps", paste0(name, ".png")), bare_fig(p),
            width = d[1], height = d[2], dpi = 300, bg = "white"),
     error = function(e) message(sprintf("[save] could not save %s: %s", name, conditionMessage(e))))
 })
+
+# ---- legend source text ---------------------------------------------
+# With FIG_TEXT = FALSE the images carry no words, so the title / subtitle / caption written
+# against each plot has to reach the document some other way. Writing it out here keeps the
+# figure and its description generated from ONE source: the legend cannot say something the
+# figure no longer shows, which is the failure the referee found in three captions.
+fig_legend_lines <- function(nm, p) {
+  t <- fig_text_of(p)
+  if (all(vapply(t, is.null, logical(1)))) return(NULL)
+  c(sprintf("### %s", nm),
+    if (!is.null(t$title))    paste0("TITLE:    ", t$title),
+    if (!is.null(t$subtitle)) paste0("SUBTITLE: ", gsub("\n", " ", t$subtitle)),
+    if (!is.null(t$caption))  paste0("CAPTION:  ", gsub("\n", " ", t$caption)),
+    "")
+}
+writeLines(c("Figure legend source text, generated by 02_analysis.R.",
+             "Images are exported bare (FIG_TEXT = FALSE); this is the text to set beneath each",
+             "figure in the document. Edit it there, not here, but keep the two in agreement.",
+             "", unlist(imap(plots, fig_legend_lines))),
+           here("results", "figure_legends.txt"))
+message("[figs] ", length(plots), " figures exported ",
+        if (isTRUE(FIG_TEXT)) "WITH" else "WITHOUT",
+        " in-figure text; legend source written to results/figure_legends.txt")
 
 # Remove stale figures from earlier runs whose section is INACTIVE this time, so an
 # old PNG (e.g. the pre-fix day/night plot, or the retired LBB/LIME comparison) does
 # not linger in the folder and cause confusion.
 conditional_figs <- c("daynight_size", "length_weight", "spr_status",
+                      "spr_male_diagnostic",
                       "fishing_pressure", "size_vs_reference", "assessment_comparison",
                       "diversity_rarefaction", "diversity_coverage")
 for (f in setdiff(conditional_figs, names(plots))) {
@@ -1763,5 +2126,13 @@ for (f in setdiff(conditional_figs, names(plots))) {
 
 htmlwidgets::saveWidget(catch_map, here("graphs and maps", "leaflet.html"),
                         selfcontained = TRUE, title = "Bream catch map")
+
+if (!is.null(movement_map)) {
+  tryCatch(
+    htmlwidgets::saveWidget(movement_map, here("graphs and maps", "movement_map.html"),
+                            selfcontained = TRUE, title = "Tag movement map"),
+    error = function(e) message(sprintf("[map] could not save movement_map.html: %s",
+                                        conditionMessage(e))))
+}
 
 message("\nDone. Figures -> 'graphs and maps/' ; tables -> 'results/'.")

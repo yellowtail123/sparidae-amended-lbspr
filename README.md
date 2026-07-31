@@ -37,33 +37,108 @@ Three fields, in the life-history table rather than the catch records:
 
 | Field | Meaning |
 |---|---|
-| `sex_system` | `protandry`, `protogyny`, or anything else for a gonochore |
+| `sex_system` | `protandry`, `protogyny`, `gonochore` or `rudimentary` |
 | `LD50_sexchange_cm_TL` | length at 50% sex change |
 | `LD95_sexchange_cm_TL` | length at 95%, defaults to 1.10 × LD50 |
 
 **No per-fish sex data is needed.** Leave `LD50` blank and it falls back to standard LB-SPR instead
-of failing.
+of failing. Anything outside those four `sex_system` values stops the run rather than guessing.
 
 Report **`SPR_bind`**: the female egg-based SPR, or under protogyny the lower of that and the male
 ratio.
 
-## The full pipeline
+## Running the pipeline
 
-`R/00_run_all.R` runs the whole analysis: catch composition, length indicators, mortality
-cross-checks, the LBSPR fit with bootstrap intervals, the amendment, diel and length–weight,
-tagging, and a photo catalogue. `R/03_stress_test.R` tests it against a known operating model under
-four kinds of misspecification.
+**1. Install.** R ≥ 4.5; `renv.lock` pins R 4.5.2 and 193 packages.
 
 ```r
 renv::restore()
+install.packages("patchwork")                       # see below
+pak::pkg_install("james-thorson/FishLife")          # GitHub-only; renv will not fetch it
+```
+
+Two packages need a hand. **FishLife** is GitHub-only, and skipping it costs you only the correlated
+parameter draws, which fall back to independent ones with a message. **patchwork** is listed as a
+hard requirement by the preflight but is not in `renv.lock`, so `renv::restore()` alone leaves the
+preflight failing on it. Installing it is the quick fix. It is only genuinely needed by `05`, which
+warns and writes its panels separately without it, so the alternative is to move `"patchwork"` from
+`hard` to `soft` in the package block of `00_run_all.R`.
+
+If you install by hand rather than through renv, note that `ggrepel` is required by `02` and is not
+part of the tidyverse metapackage, nor is it named in the preflight list. `renv::restore()` picks it
+up; a manual install from the preflight's error message will not.
+
+**2. Put your data in place.** Neither folder ships here and neither is optional.
+
+```
+all_records/bream_*.csv        catch records, one file per export; all are read and pooled
+historical_tagging/*.csv       tagging series; every CSV in the folder is read
+```
+
+Lengths must be **fork length in cm** in `length_true_cm`, with `length_type` set to `FL`. Species
+names must match the trinomials in `Sparid_LBSPR_LifeHistory_trinomial_Rready.csv`; a name that does
+not match gets no life-history row and is quietly not assessed, so check the readiness table if a
+species you expected is missing. A species needs **20 measured lengths** to be assessed, 10 for the
+length-based indicators.
+
+**3. Run.**
+
+```r
 source(here::here("R", "00_run_all.R"))
 ```
 
-R ≥ 4.5. You supply the catch records, as `all_records/bream_*.csv`; they do not ship here. A
-historical tagging series in `historical_tagging/*.csv` is optional and that step is skipped if the
-folder is empty. The life-history table does ship and shows the expected format. Lengths must be
-**fork length in cm**, species names must match that table's trinomials, and a species needs 20
-measured lengths before it is assessed.
+A preflight checks the folders, the life-history table and every required package before anything
+runs, so it cannot stop forty minutes in on something it could have caught at the start.
+
+**Order is not optional.** `02` reads `combined_records/combined_dataset.csv`, which `01` writes, and
+uses it to gate the season analysis; run `02` on its own and the season *n* comes out one higher than
+the reported figure, with a warning. `03` and `05` both call functions defined in `02` and must
+follow it **in the same session**. `04` is standalone.
+
+| Script | Does | Needs |
+|---|---|---|
+| `01_combine_data.R` | Pools the season exports and the tagging series into one length-reconciled file | both data folders |
+| `02_analysis.R` | Catch composition, length indicators, mortality envelope, the LBSPR fit with bootstrap and parameter Monte-Carlo intervals, the amendment, catch-curve cross-check, diel, length–weight, tagging, operating model | `01` |
+| `03_stress_test.R` | Misspecification battery: dome selectivity, compensatory sex change, biased life history, recruitment variability | `02`, same session |
+| `04_catalog.R` | Photographic catalogue, one self-contained HTML file | magick, jsonlite |
+| `05_manuscript_outputs.R` | Combined-dataset assessment, capture/recapture, closed-loop recovery, ogive sensitivity | `02`, same session |
+
+**4. Collect.** `results/` holds the CSV tables, `graphs and maps/` the figures and the interactive
+map, plus `combined_records/` and `catalog/`. All four are regenerated and git-ignored. Every run
+writes `results/sessionInfo.txt`, so a figure can be traced back to the session that made it.
+
+### Expect hours, not minutes
+
+Two thousand bootstrap replicates and two thousand parameter Monte-Carlo draws per assessed species,
+a thousand-replicate recovery simulation, and a thousand-replicate stress battery at every severity
+level of four stressors. Turn it down while you are setting up:
+
+| Switch | Where | Effect |
+|---|---|---|
+| `FINAL_RUN <- FALSE` | `02_analysis.R` | Halves the bootstrap and Monte-Carlo draws to 1000 |
+| `RUN_OM_SIM <- FALSE` | `02_analysis.R` | Skips the recovery simulation; the figure rebuilds from cache |
+| `RUN_OM_* <- FALSE` | `03_stress_test.R` | Skips a stressor; same caching |
+| `RUN_CATALOG <- FALSE` | `00_run_all.R` | Skips `04`, the photo re-encoding |
+
+The simulation stages cache to `results/om_*.csv` and the figures are rebuilt from whatever is on
+disk, so **delete the stale CSV before re-running a stressor with changed settings**; the figures
+will not tell you they came from the previous run. Keep `FINAL_RUN` the same in `02` and in
+`analysisfinal.Rmd`: both write the same files into `results/`, so if they disagree, the intervals
+you report depend on which ran last.
+
+### When it stops
+
+| Message | Cause |
+|---|---|
+| `Preflight failed. Fix these before running:` | Listed underneath: a missing folder, the life-history table, or a hard package. `patchwork` is the usual first one; see Install |
+| `No files matching '^bream_.*\.csv$' found in .../all_records` | Empty or misnamed data folder; the same error names `historical_tagging` |
+| `05_manuscript_outputs.R needs 02_analysis.R sourced first in this session` | `05` run on its own; source `02` first |
+| `sex must be gonochore, rudimentary, protandry, or protogyny` | A `sex_system` value the ogive cannot read |
+| `This script needs the 'magick' and 'jsonlite' packages` | `04` without ImageMagick behind magick |
+| `[skip] TropFishR not installed` | Mortality envelope and catch curve skipped; `MK_cv` falls back to the global default |
+| `[skip] rfishbase not installed` | FishBase cross-check skipped; nothing else changes |
+
+Optional packages skip their own section and say so. Hard ones stop the preflight.
 
 ## Layout
 
@@ -84,11 +159,12 @@ sparidae-amended-lbspr/
 │   ├── Sparid_LBSPR_Params.xlsx                    superseded Excel workbook
 │   └── biometrics.csv                              human-facing parameter sheet
 ├── R/
-│   ├── 00_run_all.R                                master runner
+│   ├── 00_run_all.R                                master runner, with preflight
 │   ├── 01_combine_data.R                           data assembly
 │   ├── 02_analysis.R                               assessment engine
 │   ├── 03_stress_test.R                            misspecification battery
-│   └── 04_catalog.R                                photographic catalogue
+│   ├── 04_catalog.R                                photographic catalogue
+│   └── 05_manuscript_outputs.R                     combined assessment, recovery, ogive sensitivity
 └── sex-structured-lbspr/                           the amendment, standalone
     ├── README.md                                   method write-up with the mathematics
     ├── sex_structured_lbspr.R                      the functions
@@ -96,13 +172,15 @@ sparidae-amended-lbspr/
     └── example_life_history.csv                    three species' parameters
 ```
 
-Output goes to `results/`, `graphs and maps/` and `catalog/`, all regenerated and git-ignored.
+No field data is committed here, and the `.gitignore` is written to keep it that way.
 
 ## Caveats
 
 Standard LB-SPR assumptions carry over: equilibrium, asymptotic selectivity. Life-history values are
 literature-derived with a single FL:TL ratio across species, so the intervals are wide. The male
-floor is a precautionary bound, not an estimate of fertilisation success.
+floor is a precautionary bound, not an estimate of fertilisation success. Two intervals are reported
+per species; the parameter Monte-Carlo is the wider and the more honest at these sample sizes, and
+is the one to read as the working uncertainty.
 
 ## Credits
 

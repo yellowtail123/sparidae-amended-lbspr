@@ -1,25 +1,24 @@
 # =====================================================================
 # BUILD combined_dataset.csv  —  own 2026 season + historical tagging records
 # =====================================================================
-# Merges the live season catch exports (all_records/bream_*.csv) with the historical
+# Merges your live 2026 catch exports (all_records/bream_*.csv) with the historical
 # tagging records (historical_tagging/*.csv) into one cleaned, length-reconciled file
-# written to combined_records/combined_dataset.csv. That file is produced for onward
-# analysis; nothing else in this repository reads it.
+# written to combined_records/combined_dataset.csv. That single file is what the Rmd's
+# combined analysis reads; nothing else in the pipeline changes.
 #
-# WORKFLOW: whenever new season exports are added to all_records/, re-run this script.
-# all_records/ is READ ONLY here: the script never writes to it or edits it.
+# WORKFLOW: whenever you add new 2026 exports to all_records/, re-run this script, then
+# knit the Rmd. all_records/ is READ ONLY here — the script never writes to it or edits it.
 #
-# FOLDERS EXPECTED (under the project root; none is supplied with this repository):
-#   all_records/         the bream_*.csv exports (and photos; only the CSVs are read)
-#   historical_tagging/  the historical tagging CSV(s)
-#   combined_records/    destination, created if absent; combined_dataset.csv written here
+# FOLDERS EXPECTED (all under the project root):
+#   all_records/         your bream_*.csv exports (and photos; only the CSVs are read)
+#   historical_tagging/  the historical CSV(s), e.g. GOG_tagging_cleaned_sparidae.csv
+#   combined_records/     destination — created if absent; combined_dataset.csv written here
 #
-# LENGTH SCALE (important): the season lengths are fork length (FL); the historical
-# records are total length (TL). Both are placed on the TL scale here (FL -> TL via
-# / TL_FL_RATIO), so THE OUTPUT OF THIS SCRIPT IS ON THE TL SCALE. Any downstream
-# analysis must convert the pooled series back to FL before assessing it, because the
-# life-history parameters are applied on the FL scale. Do not change one side of that
-# round-trip without the other.
+# LENGTH SCALE: your 2026 lengths are fork length (FL); the historical records are total
+# length (TL). Both are placed on the TL scale here (FL -> TL via / TL_FL_RATIO), and the
+# Rmd's combined-data chunk converts the pooled series back onto the FL scale before it is
+# assessed. That round-trip is intentional and already in place; do not change one side
+# without the other.
 # =====================================================================
 
 suppressPackageStartupMessages({
@@ -42,6 +41,18 @@ species_fix <- c(
   "Diplodus cervinus" = "Diplodus cervinus cervinus"
 )
 
+# HMGoG species list is canonical for vernacular names. The two sources disagree
+# (the historical records use the government list, the app uses the angler-facing
+# names), so common_name is DERIVED from scientific_name after the species_fix map
+# rather than trusted from either file. Anything not listed keeps whatever it came
+# with.
+common_fix <- c(
+  "Pagrus auriga"              = "Redbanded Seabream",
+  "Diplodus cervinus cervinus" = "Soldier Seabream",
+  "Pagellus acarne"            = "Bronze Seabream",
+  "Pagrus pagrus"              = "Common Seabream"
+)
+
 # Read every CSV in a folder into one frame, tagged with its dataset label. Columns are read
 # as text so files with slightly different schemas bind cleanly (the historical file carries a
 # few columns the bream exports do not, e.g. location_name); proper types are restored once,
@@ -59,8 +70,8 @@ read_folder <- function(dir, pattern, label) {
     mutate(dataset = label)
 }
 
-# Season: the SAME bream_*.csv pattern R/02_analysis.R uses, so the combined season rows
-# are exactly the fish the base assessment sees.
+# 2026 season: the SAME bream_*.csv pattern the Rmd's base loader uses, so the combined
+# 2026 rows are exactly the fish the base assessment sees.
 own  <- read_folder(OWN_DIR,  "^bream_.*\\.csv$", "2026 season")
 # Historical: every CSV in historical_tagging/ (drop additional historical files in later
 # and they are picked up automatically).
@@ -74,7 +85,10 @@ combined <- pooled |>
   distinct(fish_id, .keep_all = TRUE) |>            # unique fish; a 2026 id wins any clash (bound first)
   mutate(
     scientific_name = coalesce(unname(species_fix[scientific_name]), scientific_name),
-    length_true_cm  = if_else(length_type == "FL" & !is.na(length_true_cm),
+    common_name     = coalesce(unname(common_fix[scientific_name]),  common_name),
+    # `%in%` not `==`: a missing length_type gives NA, `NA & TRUE` is NA, and if_else
+    # would then return NA and silently destroy the length. %in% yields FALSE instead.
+    length_true_cm  = if_else(length_type %in% "FL" & !is.na(length_true_cm),
                               length_true_cm / TL_FL_RATIO, length_true_cm),   # FL -> TL
     length_type     = if_else(!is.na(length_true_cm), "TL", length_type)
   )
@@ -85,9 +99,10 @@ combined <- pooled |>
 # Records sharing a TAG NUMBER on the SAME calendar day are one capture event logged twice; a shared tag
 # on DIFFERENT days is a genuine tag -> recapture pair and is kept intact.
 # KEEP RULE: default to the richer 2026 row (it carries a geolocation). EXCEPTION: a recapture of a tag
-# first applied in the historical set is kept on the HISTORICAL row -- our lengths are fork length and the
-# historical lengths are total (tail) length, so a growth increment is only valid with both ends measured
-# the same way.
+# first applied in the historical set is kept on the HISTORICAL row. Both rows are already on the TL scale
+# by this point, so the scales do match; the reason to prefer the historical row is that it carries the
+# measurement as taken, without the FL->TL ratio and its error folded in, which matters for a growth
+# increment computed against a historical release.
 tag_origin <- combined |>
   dplyr::filter(was_tagged %in% TRUE, !is.na(new_tag_id)) |>
   group_by(.otag = as.character(new_tag_id)) |>
@@ -124,8 +139,14 @@ originals <- combined |>
 combined <- combined |>
   mutate(.mtag = if_else(had_existing_tag %in% TRUE & !is.na(existing_tag_id),
                          as.character(existing_tag_id), NA_character_)) |>
-  left_join(originals, by = ".mtag") |>
+  # relationship = "many-to-one" makes a duplicated tag number in `originals` an ERROR rather than a
+  # silent row duplication; the three target columns are coerced first because an all-empty column
+  # arrives from type_convert() as logical, and if_else/coalesce reject a logical-vs-numeric mismatch.
+  left_join(originals, by = ".mtag", relationship = "many-to-one") |>
   mutate(
+    recapture_of_fish_id = as.character(recapture_of_fish_id),
+    days_at_liberty      = as.numeric(days_at_liberty),
+    growth_length_cm     = as.numeric(growth_length_cm),
     recapture_of_fish_id = coalesce(orig_fish_id, recapture_of_fish_id),
     days_at_liberty  = if_else(!is.na(orig_date), as.numeric(as.Date(date) - as.Date(orig_date)), days_at_liberty),
     growth_length_cm = if_else(!is.na(orig_len) & !is.na(length_true_cm), length_true_cm - orig_len, growth_length_cm),
