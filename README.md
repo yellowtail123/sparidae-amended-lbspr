@@ -1,258 +1,198 @@
-# Sparidae length-based stock assessment pipeline
+# Sex-structured LB-SPR, the sequential-hermaphroditism amendment
 
-LB-SPR stock assessment for seabreams (Sparidae), amended to handle fish that change sex.
+A small, self-contained implementation of a **sex-structured spawning potential ratio (SPR)**
+for length-based stock assessment of **sequentially hermaphroditic** fishes (protandrous and
+protogynous species, e.g. many seabreams, Sparidae).
 
-Standard LB-SPR assumes half the fish at any given length are female. Most sparids are protandrous
-or protogynous, so the proportion female shifts with length and the standard calculation gets
-spawning potential wrong. This adds a sex-at-length correction.
+Standard length-based SPR (LB-SPR) accumulates per-recruit egg production as
+`maturity(L) × Lᵇ`, with no sex term: it assumes a gonochoristic stock whose sex ratio is fixed
+(about half female) at every length, so the female fraction is a constant that cancels out. For
+sequential hermaphrodites that assumption is wrong:
 
-Built for a single-season assessment of British Gibraltar Territorial Waters. The code runs on any
-comparable length data.
+- **Protogyny** (female → male): the largest fish are *male*, so size-selective fishing removes
+  much of the population's *fertilisation capacity* even while egg output looks adequate.
+- **Protandry** (male → female): the largest fish *are* the egg-producers, so fishing hits egg
+  output harder than a sex-blind model implies.
 
-## Try the amendment
+This amendment reweights egg output by a **proportion-female-at-length ogive** and reports a
+**mature-male capacity ratio alongside it** as a diagnostic. It is applied as a **post-processing
+step**: the LB-SPR
+fit itself (fishing mortality `F/M`, gear selectivity `SL50`/`SL95`, and the package SPR) is
+**left completely unchanged**, because maturity and sex play no part in the LB-SPR likelihood.
+With the sex layer disabled, or for a gonochoristic (separate-sex) species, it reduces
+**exactly** to standard LB-SPR, so it is a *generalisation*, not a competing method.
 
-Self-contained in `sex-structured-lbspr/`, no data required:
+> **Provenance.** These functions are copied **verbatim** from the assessment pipeline
+> (`../R/02_analysis.R`, section 10b), which remains the canonical source. This folder is a
+> standalone extract so the method can be read and reused on its own. The typeset mathematics is
+> given in §§1–2 below.
+
+---
+
+## 1. Standard LB-SPR (the baseline)
+
+LB-SPR (Hordyk et al. 2015a, 2015b, 2016; R package `LBSPR`) exploits the result that, at
+equilibrium and under von Bertalanffy growth, the standardised length composition of an
+exploited stock is governed by two dimensionless ratios, the life-history ratio `M/K` and the
+ratio of fishing to natural mortality `F/M`, together with the gear-selectivity ogive. Both
+maturity and selectivity are logistic in length:
+
+$$
+S_L = \left[\,1 + \exp\!\left(-\ln(19)\,\frac{L - SL_{50}}{SL_{95} - SL_{50}}\right)\right]^{-1},
+$$
+
+with the maturity ogive $m(L)$ taking the same form with $L_{50}, L_{95}$. Fitting the expected
+to the observed length composition yields `F/M` and the selectivity parameters, and the spawning
+potential ratio is the ratio of expected lifetime egg production per recruit of the fished
+stock to that of the unfished stock:
+
+$$
+\mathrm{SPR} = \frac{E_F}{E_0},
+\qquad
+E = \sum_{L} N(L)\,m(L)\,W(L),\quad W(L) = a\,L^{b},
+$$
+
+where $N(L)$ is survivorship-at-length (fished $N_F$ or unfished $N_0$) and $W(L)=aL^b$ is
+mass-at-length. Status is $\mathrm{SPR}_{f}$, the egg-based ratio, read against the conventional
+reference points $\mathrm{SPR}=0.40$ (target) and $\mathrm{SPR}=0.20$ (limit) (Goodyear 1993),
+with $F/M = 1$ marking fishing mortality equal to natural mortality.
+
+## 2. The amendment (sex-structured SPR)
+
+Write $\psi_f(L)$ for the **proportion female at length** $L$. Egg production is reweighted so
+that only the female fraction contributes eggs:
+
+$$
+E_F = \sum_{L} N_F(L)\,m(L)\,\psi_f(L)\,W(L),
+\qquad
+E_0 = \sum_{L} N_0(L)\,m(L)\,\psi_f(L)\,W(L),
+\qquad
+\mathrm{SPR}_{f} = \frac{E_F}{E_0}.
+$$
+
+The proportion-female ogive is a logistic on the **functional sex-change** lengths
+$L_{\Delta 50}, L_{\Delta 95}$ (`LD50`, `LD95`), on the same length scale as $L_\infty$:
+
+$$
+\psi_f(L)=
+\begin{cases}
+\tfrac{1}{2} & \text{gonochoristic or rudimentary,}\\[4pt]
+\left[\,1+\exp\!\left(-\ln(19)\,\dfrac{L-L_{\Delta 50}}{L_{\Delta 95}-L_{\Delta 50}}\right)\right]^{-1} & \text{protandrous (ascending),}\\[10pt]
+1-\left[\,1+\exp\!\left(-\ln(19)\,\dfrac{L-L_{\Delta 50}}{L_{\Delta 95}-L_{\Delta 50}}\right)\right]^{-1} & \text{protogynous (descending).}
+\end{cases}
+$$
+
+- **Gonochores and rudimentary hermaphrodites** take a *constant* female fraction $\tfrac12$.
+  Because a constant factor cancels from the ratio $E_F/E_0$, $\mathrm{SPR}_f$ **reduces exactly
+  to the standard SPR**; the amendment changes nothing where there is no functional sex change.
+- **Male-capacity diagnostic.** Under protogyny the large fish are male and go first, so egg-based
+  SPR alone will not show a thinned-out male component. Replacing the female fraction with its
+  complement $1-\psi_f(L)$ gives $\mathrm{SPR}_{m}$. Report it as $\mathrm{SPR}_{m}/\mathrm{SPR}_{f}$
+  against 1: one means both halves are equally depleted, below one the males are the depleted half.
+  It has **no reference point**, so do not read it against 0.20 and 0.40.
+
+  The precautionary minimum is still computed, but it is **not** the status:
+
+$$
+\mathrm{SPR}_{\mathrm{bind}} =
+\begin{cases}
+\min\!\left(\mathrm{SPR}_{f},\,\mathrm{SPR}_{m}\right) & \text{protogyny,}\\[2pt]
+\mathrm{SPR}_{f} & \text{otherwise.}
+\end{cases}
+$$
+
+  The male ratio flags a risk; it does not estimate fertilisation success, because the mating
+  function is unknown for these species (Heppell et al. 2006; Easter & White 2020). Note too that
+  the status assumes a **fixed** sex-change schedule. If females convert earlier as large males are
+  taken, egg production falls but the lengths barely move, and this method will not see it.
+
+- **Fit-invariance.** Maturity and sex never enter the LB-SPR likelihood, which depends only on
+  the length data and the selectivity and mortality parameters. The amendment therefore takes
+  the fitted $F/M$, $SL_{50}$, $SL_{95}$ **unchanged** and recomputes only the SPR, re-implementing
+  the growth-type-group per-recruit calculation of the package for that purpose (following the
+  established practice of building size-specific sex transformation into per-recruit analyses for
+  hermaphroditic stocks, Shepherd 1993; Punt et al. 1993; Benvenuto et al. 2017).
+
+## 3. Files
+
+| File | What it is |
+|---|---|
+| `sex_structured_lbspr.R` | The method. `source()` it to get `spr_sex_structured()`, `fit_lbspr_one()` and `make_lf()`. Pure base R + `tibble`/`dplyr`; the core reweight needs no `LBSPR`. |
+| `example.R` | A runnable, deterministic demonstration on three real sparids (one per sex system). |
+| `example_life_history.csv` | The three species' life-history parameters (fork-length scale) so the folder runs on its own. |
+| `README.md` | This file. |
+
+## 4. Usage
+
+```r
+source("sex_structured_lbspr.R")
+
+# Apply the amendment to a fitted stock. FM, SL50, SL95 come from a standard LBSPR fit.
+sx <- spr_sex_structured(
+  FM = 1.5, SL50 = 20.8, SL95 = 24.9,          # fitted fishing pressure + selectivity
+  Linf = 47.4, MK = 1.5, L50 = 20.8, L95 = 24.9,
+  sex_system = "protogyny", LD50 = 25.8, LD95 = 28.3,
+  FecB = 3, CVLinf = 0.10, MaleExp = 3)
+sx$SPR_gono_check   # standard LBSPR (replica of the package SPR)
+sx$SPR_fem          # female (egg-based) SPR
+sx$SPR_male         # male capacity ratio (diagnostic; read as SPR_male / SPR_fem against 1)
+sx$SPR_bind         # precautionary minimum, retained for audit; NOT the status
+```
+
+`spr_sex_structured()` arguments: `FM`, `SL50`, `SL95` (from the fit); `Linf`, `MK`, `L50`,
+`L95` (growth + maturity); `sex_system` (`"protandry"`, `"protogyny"`, or anything else →
+gonochore); `LD50`, `LD95` (functional sex-change lengths; `LD95` defaults to `1.10 × LD50`);
+`FecB` (fecundity–length exponent, default 3); `CVLinf` (default 0.10); `MaleExp` (mass exponent
+for male capacity, default 3); optional `anchor_SPR` (the package SPR, to express the correction
+as a ratio applied to it).
+
+To run the whole **fit → reweight** path from measured lengths (requires the `LBSPR` package):
+
+```r
+res <- fit_lbspr_one(L, lh_row)   # res$SPR = standard LBSPR; res$SPR_fem = amended status
+```
+
+`lh_row` is a single row carrying the columns in `example_life_history.csv`: `scientific_name`,
+`sex_system`, `Linf`, `MK`, `L50`, `L95`, `LD50`, `LD95`, `FecB`, `CVLinf`, `a` and `b`.
+
+Run the demonstration:
 
 ```sh
-cd sex-structured-lbspr
 Rscript example.R
 ```
 
-It runs on three real sparids, one per sex system, and needs only **tibble** and **dplyr**. Run it
-from inside that folder so the project's renv setup stays out of the way. The mathematics is in
-[`sex-structured-lbspr/README.md`](sex-structured-lbspr/README.md).
+## 5. References
 
-## How it works
+- Hordyk, A., Ono, K., Sainsbury, K., Loneragan, N. & Prince, J. (2015a) *Some explorations of
+  the life history ratios to describe length composition, spawning-per-recruit, and the
+  spawning potential ratio.* ICES Journal of Marine Science 72(1): 204–216.
+- Hordyk, A., Ono, K., Valencia, S., Loneragan, N. & Prince, J. (2015b) *A novel length-based
+  empirical estimation method of spawning potential ratio (SPR), and tests of its performance,
+  for small-scale, data-poor fisheries.* ICES Journal of Marine Science 72(1): 217–231.
+- Hordyk, A.R., Ono, K., Prince, J.D. & Walters, C.J. (2016) *A simple length-structured model
+  based on life history ratios and incorporating size-dependent selectivity: application to
+  spawning potential ratios for data-poor stocks.* Canadian Journal of Fisheries and Aquatic
+  Sciences.
+- Hordyk, A. (`LBSPR`) *LBSPR: Length-Based Spawning Potential Ratio.* R package,
+  https://github.com/AdrianHordyk/LBSPR
+- Goodyear, C.P. (1993) *Spawning stock biomass per recruit in fisheries management: foundation
+  and current use.*
+- Buxton, C.D. & Garratt, P.A. (1990) *Alternative reproductive styles in seabreams (Pisces:
+  Sparidae).* Environmental Biology of Fishes.
+- Shepherd, G.R. (1993) *Length-based analyses of yield and spawning biomass per recruit for
+  black sea bass, a protogynous hermaphrodite.*
+- Punt, A.E., Garratt, P.A. & Govender, A. (1993) *On an approach for applying per-recruit
+  methods to a protogynous hermaphrodite.* South African Journal of Marine Science.
+- Provost, M.M. & Jensen, O.P. (2015) *The impacts of fishing on hermaphroditic species and
+  treatment of sex change in stock assessments.* Fisheries.
+- Heppell, S.S., Heppell, S.A., Coleman, F.C. & Koenig, C.C. (2006) *Models to compare
+  management options for a protogynous fish.* Ecological Applications.
+- Easter, E.E. & White, J.W. (2020) *Influence of protogynous sex change on recovery of fish
+  populations within marine protected areas.* Ecological Applications.
+- Benvenuto, C., Coscia, I., Chopelet, J., Sala-Bozano, M. & Mariani, S. (2017) *Ecological and
+  evolutionary consequences of alternative sex-change pathways in fish.* Scientific Reports.
 
-Egg output is reweighted by a proportion-female-at-length ogive, applied after the fit rather than
-inside it. The LB-SPR fit is untouched, so F/M, selectivity and the package's own SPR come through
-unchanged. Apply it to a gonochore and you get standard LB-SPR back exactly.
+---
 
-It also computes a mature-male capacity ratio, reported *alongside* the egg-based status rather than
-folded into it. Fishing the large end of a protogynous stock removes males, which standard SPR cannot
-see, and which egg-based SPR on its own will not tell you either.
-
-## Using it on your own species
-
-Three fields, in the life-history table rather than the catch records:
-
-| Field | Meaning |
-|---|---|
-| `sex_system` | `protandry`, `protogyny`, `gonochore` or `rudimentary` |
-| `LD50_sexchange_cm_TL` | length at 50% sex change |
-| `LD95_sexchange_cm_TL` | length at 95% sex change; falls back to 1.10 × LD50 |
-
-**No per-fish sex data is needed.** Leave `LD50` blank and it falls back to standard LB-SPR instead
-of failing. Anything outside those four `sex_system` values stops the run rather than guessing.
-
-Treat the `LD95` fallback as an assumption rather than an edge case. No species in the assemblage
-assessed here carries a retrieved length at 95% sex change, so the 1.10 rule was applied to all twelve
-functional hermaphrodites. `02` sweeps both the location and the width of that ogive as separate
-sensitivity axes, and you should expect to do the same: on this dataset the width axis leaves the
-egg-based status almost unchanged but moves the male diagnostic by more than a factor of two in one
-species.
-
-Report **`SPR_fem`**, the female egg-based ratio, as the status. That is the quantity the conventional
-reference points describe: SPR = 0.40 and SPR = 0.20 are defined for spawning output per recruit
-(Goodyear 1993), and no reference point has been established for a mature-male biomass ratio.
-
-Report **`SPR_male`** alongside it as a diagnostic, read as `SPR_male / SPR_fem` against parity rather
-than against the status zones. One means both halves are equally depleted; below one the male arm is
-the depleted one, which is what protogyny predicts; above one the egg producers are, which is what
-protandry predicts. The two cannot share the same zones. Because the male ratio is weighted by mass it
-sits almost entirely in the largest fish, which under protogyny are the males a size-selective fishery
-takes first, so it falls far faster than the egg-based ratio and reaches 0.20 at a relative fishing
-mortality near one. A stock fished at *F* equal to *M*, a conventional target, would be called
-overfished on that index alone.
-
-**`SPR_bind`**, the lesser of the two, is still computed and written out for continuity, but it is not
-the status.
-
-## Running the pipeline
-
-**1. Install.** R ≥ 4.5; `renv.lock` pins R 4.5.2 and 193 packages.
-
-```r
-renv::restore()
-install.packages("patchwork")                       # see below
-pak::pkg_install("james-thorson/FishLife")          # GitHub-only; renv will not fetch it
-```
-
-Two packages need a hand. **FishLife** is GitHub-only, and skipping it costs you only the correlated
-parameter draws, which fall back to independent ones with a message. **patchwork** is listed as a
-hard requirement by the preflight but is not in `renv.lock`, so `renv::restore()` alone leaves the
-preflight failing on it. Installing it is the quick fix. It is only genuinely needed by `05`, which
-warns and writes its panels separately without it, so the alternative is to move `"patchwork"` from
-`hard` to `soft` in the package block of `00_run_all.R`.
-
-If you install by hand rather than through renv, note that `ggrepel` is required by `02` and is not
-part of the tidyverse metapackage, nor is it named in the preflight list. `renv::restore()` picks it
-up; a manual install from the preflight's error message will not.
-
-**2. Put your data in place.** Neither folder ships here and neither is optional.
-
-```
-all_records/bream_*.csv        catch records, one file per export; all are read and pooled
-historical_tagging/*.csv       tagging series; every CSV in the folder is read
-```
-
-Lengths must be **fork length in cm** in `length_true_cm`, with `length_type` set to `FL`. Species
-names must match the trinomials in `Sparid_LBSPR_LifeHistory_trinomial_Rready.csv`; a name that does
-not match gets no life-history row and is quietly not assessed, so check the readiness table if a
-species you expected is missing. A species needs **20 measured lengths** to be assessed, 10 for the
-length-based indicators.
-
-**3. Run.**
-
-```r
-source(here::here("R", "00_run_all.R"))
-```
-
-A preflight checks the folders, the life-history table and every required package before anything
-runs, so it cannot stop forty minutes in on something it could have caught at the start.
-
-**Order is not optional.** `02` reads `combined_records/combined_dataset.csv`, which `01` writes, and
-uses it to gate the season analysis; run `02` on its own and the season *n* comes out one higher than
-the reported figure, with a warning. `03` and `05` both call functions defined in `02` and must
-follow it **in the same session**. `04` is standalone.
-
-| Script | Does | Needs |
-|---|---|---|
-| `01_combine_data.R` | Pools the season exports and the tagging series into one length-reconciled file | both data folders |
-| `02_analysis.R` | Catch composition, length indicators, mortality envelope, the LBSPR fit with bootstrap and parameter Monte-Carlo intervals, the amendment, catch-curve cross-check, diel, length–weight, tagging, operating model | `01` |
-| `03_stress_test.R` | Misspecification battery: dome selectivity, compensatory sex change, biased life history, recruitment variability | `02`, same session |
-| `04_catalog.R` | Photographic catalogue, one self-contained HTML file | magick, jsonlite |
-| `05_manuscript_outputs.R` | Combined-dataset assessment, capture/recapture, closed-loop recovery, ogive sensitivity | `02`, same session |
-
-**4. Collect.** `results/` holds the CSV tables, `graphs and maps/` the figures and the interactive
-map, plus `combined_records/` and `catalog/`. All four are regenerated and git-ignored. Every run
-writes `results/sessionInfo.txt`, so a figure can be traced back to the session that made it.
-
-### Expect hours, not minutes
-
-Two thousand bootstrap replicates and two thousand parameter Monte-Carlo draws per assessed species,
-a thousand-replicate recovery simulation, and a thousand-replicate stress battery at every severity
-level of four stressors. Turn it down while you are setting up:
-
-| Switch | Where | Effect |
-|---|---|---|
-| `FINAL_RUN <- FALSE` | `02_analysis.R` | Halves the bootstrap and Monte-Carlo draws to 1000 |
-| `RUN_OM_SIM <- FALSE` | `02_analysis.R` | Skips the recovery simulation; the figure rebuilds from cache |
-| `RUN_OM_* <- FALSE` | `03_stress_test.R` | Skips a stressor; same caching |
-| `RUN_CATALOG <- FALSE` | `00_run_all.R` | Skips `04`, the photo re-encoding |
-
-The simulation stages cache to `results/om_*.csv` and the figures are rebuilt from whatever is on
-disk, so **delete the stale CSV before re-running a stressor with changed settings**; the figures
-will not tell you they came from the previous run. If you knit a manuscript from the same
-`results/`, keep its `FINAL_RUN` the same as in `02`: both write the same files, so if they disagree,
-the intervals you report depend on which ran last. The manuscript source is not published here.
-
-### When it stops
-
-| Message | Cause |
-|---|---|
-| `Preflight failed. Fix these before running:` | Listed underneath: a missing folder, the life-history table, or a hard package. `patchwork` is the usual first one; see Install |
-| `No files matching '^bream_.*\.csv$' found in .../all_records` | Empty or misnamed data folder; the same error names `historical_tagging` |
-| `05_manuscript_outputs.R needs 02_analysis.R sourced first in this session` | `05` run on its own; source `02` first |
-| `sex must be gonochore, rudimentary, protandry, or protogyny` | A `sex_system` value the ogive cannot read |
-| `This script needs the 'magick' and 'jsonlite' packages` | `04` without ImageMagick behind magick |
-| `[skip] TropFishR not installed` | Mortality envelope and catch curve skipped; `MK_cv` falls back to the global default |
-| `[skip] rfishbase not installed` | FishBase cross-check skipped; nothing else changes |
-
-Optional packages skip their own section and say so. Hard ones stop the preflight.
-
-## Layout
-
-```
-sparidae-amended-lbspr/
-├── README.md                                       this file
-├── LICENSE                                         MIT
-├── CITATION.cff                                    how to cite
-├── .gitignore                                      code-only policy
-├── .Rprofile                                       activates renv on open
-├── renv.lock                                       pinned package versions (R 4.5.2)
-├── renv/
-│   ├── activate.R                                  renv bootstrap
-│   └── .gitignore
-├── sparidae-lbspr.Rproj                            project anchor, defines the here() root
-├── Sparid_LBSPR_LifeHistory_trinomial_Rready.csv   life-history inputs
-├── life histories/                                 reference copies, not read by the code
-│   ├── Sparid_LBSPR_Params.xlsx                    superseded Excel workbook
-│   └── biometrics.csv                              human-facing parameter sheet
-├── R/
-│   ├── 00_run_all.R                                master runner, with preflight
-│   ├── 01_combine_data.R                           data assembly
-│   ├── 02_analysis.R                               assessment engine
-│   ├── 03_stress_test.R                            misspecification battery
-│   ├── 04_catalog.R                                photographic catalogue
-│   └── 05_manuscript_outputs.R                     combined assessment, recovery, ogive sensitivity
-└── sex-structured-lbspr/                           the amendment, standalone
-    ├── README.md                                   method write-up with the mathematics
-    ├── sex_structured_lbspr.R                      the functions
-    ├── example.R                                   runnable demonstration
-    └── example_life_history.csv                    three species' parameters
-```
-
-No field data is committed here, and the `.gitignore` is written to keep it that way.
-
-## Caveats
-
-Standard LB-SPR assumptions carry over: equilibrium, asymptotic selectivity. Life-history values are
-literature-derived with a single FL:TL ratio across species, so the intervals are wide. Two intervals
-are reported per species; the parameter Monte-Carlo is the wider and the more honest at these sample
-sizes, and is the one to read as the working uncertainty.
-
-The male-capacity ratio carries no established reference point and is read against parity, never
-against the 0.20 and 0.40 zones. It bounds the risk of male limitation rather than estimating
-fertilisation success, because the mating function relating sex ratio to realised reproduction is
-unknown for these species.
-
-**The egg-based status assumes a fixed sex-change schedule, and cannot check that assumption.** The
-stress battery in `03` shows it is blind to compensatory sex change: if females convert earlier as
-large males are removed, true egg production falls steeply while the length composition barely moves,
-and the estimator returns an unchanged value. In simulation, the correct status zone is recovered in
-essentially none of the replicates under the mildest compensation tested. Nothing in length data can
-distinguish a fixed schedule from a plastic one. Where compensation is occurring the egg-based status
-is optimistic, and the male ratio is the quantity that moves first, which is the main reason to report
-both.
-
-## Credits
-
-A thin sex-structured layer over established packages, not a reimplementation:
-
-| Package | Author | Used for |
-|---|---|---|
-| [LBSPR](https://github.com/AdrianHordyk/LBSPR) | Hordyk | the LB-SPR fit itself |
-| [TropFishR](https://github.com/tokami/TropFishR) | Mildenberger et al. | catch curve, natural-mortality envelope |
-| [FishLife](https://github.com/James-Thorson-NOAA/FishLife) | Thorson | life-history priors |
-| [rfishbase](https://github.com/ropensci/rfishbase) | Boettiger et al. | FishBase cross-checks |
-
-Everything else is declared at the top of each script and pinned in `renv.lock`.
-
-Cite this pipeline using [`CITATION.cff`](CITATION.cff). Released under the MIT License (see
-[`LICENSE`](LICENSE)).
-
-## References
-
-- Hordyk, A., Ono, K., Sainsbury, K., Loneragan, N. & Prince, J. (2015a) Some explorations of the
-  life history ratios to describe length composition, spawning-per-recruit, and the spawning
-  potential ratio. *ICES Journal of Marine Science* 72(1): 204–216.
-  [doi](https://doi.org/10.1093/icesjms/fst235)
-- Hordyk, A., Ono, K., Valencia, S., Loneragan, N. & Prince, J. (2015b) A novel length-based
-  empirical estimation method of spawning potential ratio (SPR). *ICES Journal of Marine Science*
-  72(1): 217–231. [doi](https://doi.org/10.1093/icesjms/fsu004)
-- Hordyk, A.R., Ono, K., Prince, J.D. & Walters, C.J. (2016) A simple length-structured model based
-  on life history ratios and incorporating size-dependent selectivity. *Canadian Journal of
-  Fisheries and Aquatic Sciences* 73(12): 1787–1799.
-  [doi](https://doi.org/10.1139/cjfas-2015-0422)
-- Mildenberger, T.K., Taylor, M.H. & Wolff, M. (2017) TropFishR: an R package for fisheries analysis
-  with length-frequency data. *Methods in Ecology and Evolution* 8(11): 1520–1527.
-  [doi](https://doi.org/10.1111/2041-210X.12791)
-- Thorson, J.T., Munch, S.B., Cope, J.M. & Gao, J. (2017) Predicting life history parameters for all
-  fishes worldwide. *Ecological Applications* 27(8): 2262–2276.
-  [doi](https://doi.org/10.1002/eap.1606)
-- Boettiger, C., Lang, D.T. & Wainwright, P.C. (2012) rfishbase: exploring, manipulating and
-  visualizing FishBase data from R. *Journal of Fish Biology* 81(6): 2030–2039.
-  [doi](https://doi.org/10.1111/j.1095-8649.2012.03464.x)
-- Goodyear, C.P. (1993) Spawning stock biomass per recruit in fisheries management: foundation and
-  current use. *Canadian Special Publication of Fisheries and Aquatic Sciences* 120: 67–81.
+*Extracted from the BGTW Sparidae length-based stock assessment (LBSPR with a
+sequential-hermaphroditism amendment). Licensed as the parent repository (see `../LICENSE`).*
