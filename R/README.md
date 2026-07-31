@@ -21,3 +21,4 @@ Run-control switches sit in a block at the top of `02_analysis.R` and `03_stress
 
 The sex-structured amendment itself is not here. It is standalone, with its own write-up and a
 runnable example, in [`../sex-structured-lbspr/`](../sex-structured-lbspr/).
+
